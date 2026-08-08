@@ -13,15 +13,21 @@
    ========================================================================= */
 
 const DB_NAME = 'flexloop';
-const DB_VERSION = 1;
-export const SCHEMA_VERSION = 1;
+const DB_VERSION = 2;
+export const SCHEMA_VERSION = 2;
 
 const STORE_EX = 'exercises';
 const STORE_SE = 'sessions';
+const STORE_RO = 'routines';
 
 let _db = null;
 
-/** Open (and if needed create) the database. Cached after the first call. */
+/**
+ * Open (and if needed create) the database. Cached after the first call.
+ *
+ * Every store is created behind a `contains` check, so this upgrade path is
+ * additive: a v1 database gains `routines` and keeps its rows.
+ */
 export function openDB() {
   if (_db) return Promise.resolve(_db);
   return new Promise((resolve, reject) => {
@@ -34,6 +40,9 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORE_SE)) {
         const s = db.createObjectStore(STORE_SE, { keyPath: 'id' });
         s.createIndex('date', 'date', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_RO)) {
+        db.createObjectStore(STORE_RO, { keyPath: 'id' });
       }
       void e;
     };
@@ -87,6 +96,20 @@ export const getSession = (id) => get(STORE_SE, id);
 export const saveSession = (s) => put(STORE_SE, s);
 export const deleteSession = (id) => del(STORE_SE, id);
 
+/* -------------------------------------------------------------- routines */
+
+/**
+ * A routine is an ordered exercise list and nothing more:
+ *   { id, name, items: [{ exerciseId, sets }], createdAt, updatedAt, lastUsedAt }
+ *
+ * Deliberately no target weights. Sets already prefill from the last time you
+ * trained the exercise, so a stored target would be a second, staler source of
+ * the same number.
+ */
+export const allRoutines = () => getAll(STORE_RO);
+export const saveRoutine = (r) => put(STORE_RO, r);
+export const deleteRoutine = (id) => del(STORE_RO, id);
+
 /* -------------------------------------------------------------- settings */
 
 const SETTINGS_KEY = 'flexloop.settings';
@@ -124,13 +147,16 @@ export function saveSettings(s) {
 
 /** The whole database as one plain object — the shape written to .json. */
 export async function exportAll() {
-  const [exercises, sessions] = await Promise.all([allExercises(), allSessions()]);
+  const [exercises, sessions, routines] = await Promise.all([
+    allExercises(), allSessions(), allRoutines(),
+  ]);
   return {
     schemaVersion: SCHEMA_VERSION,
     app: 'flexloop',
     exportedAt: new Date().toISOString(),
     exercises,
     sessions: sessions.slice().sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0)),
+    routines,
     settings: loadSettings(),
   };
 }
@@ -145,6 +171,10 @@ export function validateBackup(data) {
   if (!Array.isArray(data.sessions) || !Array.isArray(data.exercises)) {
     throw new Error('Backup is missing its sessions or exercises list.');
   }
+  // Routines arrived in schema v2. A v1 file simply has none, which is fine.
+  if (data.routines != null && !Array.isArray(data.routines)) {
+    throw new Error('Backup has a routines field that is not a list.');
+  }
   return true;
 }
 
@@ -154,16 +184,23 @@ export function validateBackup(data) {
  */
 export async function importAll(data, mode = 'replace') {
   validateBackup(data);
+  const routines = Array.isArray(data.routines) ? data.routines : [];
   if (mode === 'replace') {
     await clear(STORE_EX);
     await clear(STORE_SE);
+    await clear(STORE_RO);
   }
   await putMany(STORE_EX, data.exercises);
   await putMany(STORE_SE, data.sessions);
+  if (routines.length) await putMany(STORE_RO, routines);
   if (data.settings && mode === 'replace') {
     saveSettings(Object.assign({}, DEFAULT_SETTINGS, data.settings));
   }
-  return { exercises: data.exercises.length, sessions: data.sessions.length };
+  return {
+    exercises: data.exercises.length,
+    sessions: data.sessions.length,
+    routines: routines.length,
+  };
 }
 
 /** Ask the browser not to evict us. Safe to call on every start. */
@@ -183,4 +220,4 @@ export async function storageEstimate() {
   try { return await navigator.storage.estimate(); } catch { return null; }
 }
 
-export { STORE_EX, STORE_SE };
+export { STORE_EX, STORE_SE, STORE_RO };

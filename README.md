@@ -47,7 +47,7 @@ editing for your repo name.
 2. Open `sw.js` and bump the version at the top:
 
    ```js
-   const CACHE_VERSION = 'flexloop-v2';   // was v1
+   const CACHE_VERSION = 'flexloop-v4';   // was v3
    ```
 
    **This is the only step people forget.** Without a bump the old cache keeps
@@ -82,12 +82,15 @@ Run this once after installing. It takes about three minutes.
 8. **Render a chart.** Tap the exercise's name on its card in the Log. Progress →
    Per exercise should open on that exercise and the estimated 1RM chart should
    draw. Tap a point; a tooltip appears.
-9. **Reboot the phone.** Still in airplane mode, relaunch from the Home Screen.
-   Everything from steps 6–8 must still be there.
-10. **Export.** Turn airplane mode off, go to Data → Export backup, and confirm a
+9. **Save and start a routine.** Still offline: at the bottom of a session tap
+   "Save as routine" and name it. Finish the session; the routine appears under
+   "Start from a routine" on the Log. Tap it — the sets should already be there.
+10. **Reboot the phone.** Still in airplane mode, relaunch from the Home Screen.
+    Everything from steps 6–9 must still be there.
+11. **Export.** Turn airplane mode off, go to Data → Export backup, and confirm a
     `flexloop-YYYY-MM-DD.json` lands in your Files app.
 
-Step 10 is not optional. iOS clears the storage of sites it considers unused, and
+Step 11 is not optional. iOS clears the storage of sites it considers unused, and
 an installed Home Screen app reduces that risk without removing it. The exported
 file is the only real backup.
 
@@ -102,6 +105,29 @@ the session note. Nothing already on the device is deleted.
 **Data → Import backup** restores a flexloop `.json` export. This one *replaces*
 everything, and asks first.
 
+## Routines
+
+A routine is an ordered list of exercises with a set count for each — nothing else.
+There are deliberately **no target weights**: sets already prefill from the last
+time you trained the exercise, so a stored target would be a second, staler copy
+of a number the app can work out for itself.
+
+Two ways to make one:
+
+- **Save as routine**, at the bottom of any session, keeps the exercises you just
+  did along with the number of working sets each got. Warmups are not part of the
+  plan, so they are left out. The name is prefilled with whichever muscle group
+  dominates the session.
+- **Data → Manage routines → New routine** builds one from scratch.
+
+Starting a routine from the Log opens a session with every set already laid out
+and prefilled. Start one while a session is already open and it offers to fold the
+exercises into that session instead, so you never end up with two sessions running
+at once. Exercises you have since deleted are skipped, and the toast says how many.
+
+Backups carry routines from schema v2 onward. A v1 backup still imports — it simply
+has none.
+
 ## Files
 
 ```
@@ -110,7 +136,8 @@ manifest.webmanifest    relative start_url and scope, icons
 sw.js                   precache list + CACHE_VERSION
 css/app.css             the whole visual system
 js/app.js               routing, views, all interaction
-js/db.js                IndexedDB wrapper, export/import, settings
+js/db.js                IndexedDB wrapper (exercises, sessions, routines),
+                        export/import, settings
 js/stats.js             e1RM, volume, PRs, weekly aggregates, dates
 js/charts.js            hand-written SVG line and bar charts
 js/importers.js         Strongify CSV reader
@@ -162,6 +189,8 @@ since there is nothing left to chart.
   you forgot to finish never hijacks the Log screen the next morning.
 - Cardio distance/duration is not logged. Duration is read from imported files and
   preserved, but there is no UI for it.
+- A routine stores no weights, and no days-of-the-week schedule. It is a list to
+  work down, not a programme to obey.
 
 ## Licence
 

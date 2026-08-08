@@ -20,6 +20,7 @@ const state = {
   exercises: [],
   byId: new Map(),
   sessions: [],
+  routines: [],
   activeId: null,
   progressTab: localStorage.getItem('flexloop.progressTab') || 'overview',
   progressEx: localStorage.getItem('flexloop.progressEx') || null,
@@ -58,9 +59,16 @@ function toast(message, actionLabel, onAction, ms = 3200) {
 
 function openSheet(html, wire) {
   const sheet = $('#sheet');
-  $('#sheet-body').innerHTML = html;
+  const old = $('#sheet-body');
+  // Sheets delegate their clicks from #sheet-body, and closing only emptied it,
+  // so every sheet used to leave its listener behind on a node the next sheet
+  // reused. Two menus opened in a row then both acted on one tap — with stale
+  // indices, which quietly deleted the wrong set. Swap in a fresh node instead.
+  const body = old.cloneNode(false);
+  body.innerHTML = html;
+  old.replaceWith(body);
   sheet.hidden = false;
-  if (wire) wire($('#sheet-body'));
+  if (wire) wire(body);
 }
 function closeSheet() {
   $('#sheet').hidden = true;
@@ -89,13 +97,54 @@ function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
   });
 }
 
+/** Resolves to the trimmed string, or null if cancelled or left empty. */
+function promptSheet({ title, body, label, value = '', placeholder = '', confirm = 'Save' }) {
+  return new Promise((resolve) => {
+    openSheet(`
+      <h2>${esc(title)}</h2>
+      ${body ? `<p class="sub">${esc(body)}</p>` : ''}
+      <div class="field" style="margin-top:14px">
+        <label for="pr-in">${esc(label)}</label>
+        <input class="input" id="pr-in" value="${esc(value)}" placeholder="${esc(placeholder)}"
+               autocapitalize="words" autocomplete="off" enterkeyhint="done">
+      </div>
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn" data-x="no">Cancel</button>
+        <button class="btn btn-primary" data-x="yes">${esc(confirm)}</button>
+      </div>`, (root) => {
+      const input = $('#pr-in', root);
+      const done = (ok) => {
+        const v = input.value.trim();
+        closeSheet();
+        resolve(ok && v ? v : null);
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); });
+      root.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-x]');
+        if (b) done(b.dataset.x === 'yes');
+      });
+      // iOS only raises the keyboard for a focus inside the current task.
+      setTimeout(() => input.focus(), 60);
+    });
+  });
+}
+
 /* ------------------------------------------------------------------- data */
 
+/** Most recently used first, then the never-used ones alphabetically. */
+function sortRoutines(list) {
+  return list.slice().sort((a, b) =>
+    (b.lastUsedAt || 0) - (a.lastUsedAt || 0) || a.name.localeCompare(b.name));
+}
+
 async function reload() {
-  const [exercises, sessions] = await Promise.all([db.allExercises(), db.allSessions()]);
+  const [exercises, sessions, routines] = await Promise.all([
+    db.allExercises(), db.allSessions(), db.allRoutines(),
+  ]);
   state.exercises = exercises.sort((a, b) => a.name.localeCompare(b.name));
   state.byId = new Map(exercises.map((e) => [e.id, e]));
   state.sessions = sessions;
+  state.routines = sortRoutines(routines);
   // A session left open overnight is finished, not in progress. Close anything
   // older than 18h so the Log screen never reopens last week's workout.
   const open = sessions.find((s) => !s.endedAt);
@@ -132,13 +181,15 @@ const routes = [
   [/^#\/progress$/,         () => viewProgress()],
   [/^#\/data$/,             () => viewData()],
   [/^#\/exercises$/,        () => viewExercises()],
+  [/^#\/routines$/,         () => viewRoutines()],
+  [/^#\/routine\/(.+)$/,    (m) => viewRoutine(m[1])],
 ];
 
 function currentTab() {
   const h = location.hash;
   if (h.startsWith('#/history') || h.startsWith('#/session')) return 'history';
   if (h.startsWith('#/progress')) return 'progress';
-  if (h.startsWith('#/data') || h.startsWith('#/exercises')) return 'data';
+  if (h.startsWith('#/data') || h.startsWith('#/exercises') || h.startsWith('#/routine')) return 'data';
   return 'log';
 }
 
@@ -187,6 +238,7 @@ function viewLog() {
         : 'No sessions logged yet. The first one sets your baseline.'}</p>
       <div style="height:18px"></div>
       <button class="btn btn-primary btn-lg btn-block" data-act="start">Start session</button>
+      ${routinePickerHtml()}
       ${todays.length ? `
         <h3 class="h-sec">Finished today</h3>
         <div class="rows">${todays.map(sessionRowHtml).join('')}</div>` : ''}
@@ -207,12 +259,54 @@ function viewLog() {
     <div style="height:16px"></div>
     <div data-entries>${(session.entries || []).map((e, i) => entryHtml(session, e, i)).join('')}</div>
     <button class="btn btn-block" data-act="pick-exercise">+ Add exercise</button>
+    ${saveRoutineBtnHtml(session)}
     <div class="field" style="margin-top:20px">
       <label for="snotes">Session notes</label>
       <textarea class="input" id="snotes" data-act="notes" placeholder="Felt strong, bar speed good…">${esc(session.notes || '')}</textarea>
     </div>
     <button class="btn btn-primary btn-block btn-lg" data-act="finish">Finish session</button>
     <button class="btn btn-quiet btn-block btn-sm" style="margin-top:8px" data-act="discard">Discard session</button>`;
+}
+
+/** Sits under "+ Add exercise": this list of exercises *is* the routine. */
+function saveRoutineBtnHtml(session) {
+  if (!(session.entries || []).length) return '';
+  return `<button class="btn btn-quiet btn-block btn-sm" style="margin-top:8px"
+    data-act="save-routine" data-id="${esc(session.id)}">Save as routine</button>`;
+}
+
+/** How many of a routine's exercises still exist, and a readable list. */
+function routineExercises(routine) {
+  return (routine.items || [])
+    .filter((it) => state.byId.has(it.exerciseId))
+    .map((it) => ({ ...it, ex: state.byId.get(it.exerciseId) }));
+}
+
+function routineSummary(routine) {
+  const live = routineExercises(routine);
+  if (!live.length) return 'No exercises left in this routine';
+  const sets = live.reduce((t, it) => t + (it.sets || 1), 0);
+  return `${live.length} exercise${live.length === 1 ? '' : 's'} · ${sets} set${sets === 1 ? '' : 's'}`;
+}
+
+/** The "start from a routine" block under the Start button on an idle Log. */
+function routinePickerHtml() {
+  if (!state.routines.length) return '';
+  const rows = state.routines.slice(0, 6).map((r) => `
+    <button class="row" data-act="start-routine" data-id="${esc(r.id)}">
+      <span class="grow">
+        <span class="t">${esc(r.name)}</span>
+        <span class="s">${esc(routineSummary(r))}</span>
+      </span>
+      <span class="r">${r.lastUsedAt
+        ? esc(S.relativeDays(S.localDate(new Date(r.lastUsedAt))))
+        : 'new'}</span>
+    </button>`).join('');
+  return `<h3 class="h-sec">Start from a routine</h3>
+    <div class="rows">${rows}</div>
+    ${state.routines.length > 6
+      ? `<p class="meta" style="text-align:left;padding:8px 0 0"><a href="#/routines">All ${state.routines.length} routines</a></p>`
+      : ''}`;
 }
 
 function elapsed(session) {
@@ -304,7 +398,7 @@ function entryHtml(session, entry, ei) {
 
 /* --------------------------------------------------------- log mutations */
 
-async function startSession() {
+async function newSession() {
   const now = new Date();
   const s = {
     id: uid('s'),
@@ -317,9 +411,59 @@ async function startSession() {
   await db.saveSession(s);
   state.sessions.unshift(s);
   state.activeId = s.id;
+  return s;
+}
+
+async function startSession() {
+  await newSession();
   location.hash = '#/log';
   render();
   pickExercise();
+}
+
+/** Open a session already filled in with a routine's exercises and sets. */
+async function startRoutine(routineId) {
+  const r = state.routines.find((x) => x.id === routineId);
+  if (!r) return;
+  const live = routineExercises(r);
+  if (!live.length) {
+    toast('Every exercise in that routine has been deleted');
+    return;
+  }
+  // Starting a routine mid-session would leave two sessions open at once, and
+  // reload() would then have to guess which one you meant. Fold into the open
+  // one instead.
+  const open = activeSession();
+  if (open) {
+    const ok = await confirmSheet({
+      title: 'Session already in progress',
+      body: `Add the ${live.length} exercise${live.length === 1 ? '' : 's'} from ${r.name} to the session you have open?`,
+      confirm: 'Add to session',
+    });
+    if (!ok) return;
+  }
+  const session = open || await newSession();
+
+  for (const it of live) {
+    let entry = session.entries.find((e) => e.exerciseId === it.exerciseId);
+    if (!entry) {
+      entry = { exerciseId: it.exerciseId, sets: [] };
+      session.entries.push(entry);
+    }
+    // Each set prefills from the one before it, exactly as tapping "+ Set" would.
+    for (let i = 0; i < setCountOf(it); i++) entry.sets.push(makeSet(session, entry));
+  }
+  await persist(session);
+
+  r.lastUsedAt = Date.now();
+  await db.saveRoutine(r);
+  state.routines = sortRoutines(state.routines);
+
+  const dropped = (r.items || []).length - live.length;
+  location.hash = '#/log';
+  render();
+  toast(`${open ? 'Added' : 'Started'} ${r.name}${dropped
+    ? ` — ${dropped} deleted exercise${dropped === 1 ? '' : 's'} skipped` : ''}`);
 }
 
 /** New sets inherit from the previous set here, else from last time. */
@@ -334,15 +478,19 @@ function nextSetValues(session, entry) {
   return { weight: ex && ex.isBodyweight ? 0 : 20, reps: 8 };
 }
 
-async function addSet(session, entry, isWarmup = false) {
+function makeSet(session, entry, isWarmup = false) {
   const v = nextSetValues(session, entry);
-  entry.sets.push({
+  return {
     weight: isWarmup ? Math.round((v.weight * 0.5) / 2.5) * 2.5 : v.weight,
     reps: v.reps,
     rpe: null,
     isWarmup,
     done: false,
-  });
+  };
+}
+
+async function addSet(session, entry, isWarmup = false) {
+  entry.sets.push(makeSet(session, entry, isWarmup));
   await persist(session);
 }
 
@@ -447,6 +595,7 @@ function viewSession(id) {
     <div style="height:16px"></div>
     <div data-entries>${(session.entries || []).map((e, i) => entryHtml(session, e, i)).join('')}</div>
     <button class="btn btn-block" data-act="pick-exercise">+ Add exercise</button>
+    ${saveRoutineBtnHtml(session)}
     <div class="field" style="margin-top:20px">
       <label for="snotes">Session notes</label>
       <textarea class="input" id="snotes" data-act="notes" placeholder="Nothing noted">${esc(session.notes || '')}</textarea>
@@ -729,6 +878,10 @@ async function viewData() {
       </div>
     </div>
 
+    <h3 class="h-sec">Routines</h3>
+    <a class="btn btn-block" href="#/routines">Manage routines${state.routines.length
+      ? ` <span style="color:var(--mist)">· ${state.routines.length}</span>` : ''}</a>
+
     <h3 class="h-sec">Exercises</h3>
     <a class="btn btn-block" href="#/exercises">Manage exercise list</a>
 
@@ -816,6 +969,162 @@ function editExerciseSheet(id) {
 }
 
 /* ==========================================================================
+   VIEW: ROUTINES
+
+   A routine is an ordered exercise list with a set count each. It stores no
+   weights on purpose — sets prefill from the last time you trained the
+   exercise, so a stored target would only go stale.
+   ========================================================================== */
+
+const routineById = (id) => state.routines.find((r) => r.id === id) || null;
+
+/** Set counts are clamped: a routine is a plan, not a place to store 40 sets. */
+const setCountOf = (item) => Math.max(1, Math.min(12, Math.round(Number(item && item.sets) || 1)));
+
+async function saveRoutine(r) {
+  r.updatedAt = Date.now();
+  await db.saveRoutine(r);
+  state.routines = sortRoutines(state.routines);
+}
+
+function viewRoutines() {
+  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/data">Back</a>`;
+  const rows = state.routines.map((r) => `
+    <button class="row" data-act="open-routine" data-id="${esc(r.id)}">
+      <span class="grow">
+        <span class="t">${esc(r.name)}</span>
+        <span class="s">${esc(routineSummary(r))}</span>
+      </span>
+      <span class="r">${r.lastUsedAt
+        ? esc(S.relativeDays(S.localDate(new Date(r.lastUsedAt))))
+        : 'new'}</span>
+    </button>`).join('');
+
+  $('#view').innerHTML = `
+    <p class="eyebrow">Routines</p>
+    <h2 class="h-big">${state.routines.length} saved</h2>
+    <p class="sub">An ordered list of exercises. Starting one opens a session with
+      every set already laid out, prefilled from the last time you trained it.</p>
+    <div style="height:14px"></div>
+    <button class="btn btn-block" data-act="new-routine">+ New routine</button>
+    ${state.routines.length ? `<div style="height:12px"></div><div class="rows">${rows}</div>`
+      : `<div class="empty"><div class="glyph"></div><h3>No routines yet</h3>
+         <p>Build one here, or tap “Save as routine” at the bottom of any session
+            to keep the exercises you just did.</p></div>`}`;
+}
+
+function viewRoutine(id) {
+  const r = routineById(id);
+  const view = $('#view');
+  if (!r) {
+    view.innerHTML = `<div class="empty"><div class="glyph"></div><h3>Routine not found</h3>
+      <p>It may have been deleted.</p><a class="btn" href="#/routines">Back to routines</a></div>`;
+    return;
+  }
+  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/routines">Back</a>`;
+  const items = r.items || [];
+  const missing = items.filter((it) => !state.byId.has(it.exerciseId)).length;
+
+  view.innerHTML = `
+    <p class="eyebrow">Routine</p>
+    <h2 class="h-big">${esc(r.name)}</h2>
+    <p class="sub">${esc(routineSummary(r))}${missing
+      ? ` · ${missing} deleted exercise${missing === 1 ? '' : 's'}, skipped on start` : ''}</p>
+    <div style="height:14px"></div>
+
+    ${items.length ? `<div class="rt-list">${items.map((it, i) => {
+      const ex = state.byId.get(it.exerciseId);
+      return `<div class="rt-item" data-i="${i}">
+        <span class="rt-name${ex ? '' : ' is-gone'}">${esc(ex ? ex.name : 'Removed exercise')}</span>
+        <span class="rt-sets">
+          <button class="step" data-act="routine-sets" data-d="-1" aria-label="Fewer sets">−</button>
+          <span class="rt-n">${setCountOf(it)}<em>sets</em></span>
+          <button class="step" data-act="routine-sets" data-d="1" aria-label="More sets">+</button>
+        </span>
+        <button class="btn btn-sm btn-quiet" data-act="routine-item-menu" aria-label="Options">•••</button>
+      </div>`;
+    }).join('')}</div>` : `<div class="empty" style="padding:26px 10px">
+      <p style="margin:0">Nothing in this routine yet.</p></div>`}
+
+    <button class="btn btn-block" data-act="routine-add">+ Add exercise</button>
+    <div style="height:18px"></div>
+    <button class="btn btn-primary btn-block btn-lg" data-act="start-routine" data-id="${esc(r.id)}">
+      Start this routine</button>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn btn-sm" data-act="rename-routine" data-id="${esc(r.id)}">Rename</button>
+      <button class="btn btn-sm btn-danger" data-act="delete-routine" data-id="${esc(r.id)}">Delete</button>
+    </div>`;
+}
+
+/** The item index a control inside the routine editor belongs to. */
+function routineItemIndex(el) {
+  const row = el.closest('[data-i]');
+  return row ? Number(row.dataset.i) : -1;
+}
+
+function routineItemMenu(r, i) {
+  const it = r.items[i];
+  const ex = state.byId.get(it.exerciseId);
+  openSheet(`
+    <h2>${esc(ex ? ex.name : 'Removed exercise')}</h2>
+    <p class="sub">${setCountOf(it)} set${setCountOf(it) === 1 ? '' : 's'} · position ${i + 1} of ${r.items.length}</p>
+    <div class="rows" style="margin-top:14px">
+      <button class="row" data-x="up"><span class="grow"><span class="t">Move up</span></span></button>
+      <button class="row" data-x="down"><span class="grow"><span class="t">Move down</span></span></button>
+      <button class="row" data-x="rm"><span class="grow"><span class="t" style="color:var(--danger)">Remove from routine</span>
+        <span class="s">The exercise itself is untouched</span></span></button>
+    </div>`, (root) => {
+    root.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-x]');
+      if (!b) return;
+      const list = r.items;
+      if (b.dataset.x === 'up' && i > 0) list.splice(i - 1, 0, list.splice(i, 1)[0]);
+      if (b.dataset.x === 'down' && i < list.length - 1) list.splice(i + 1, 0, list.splice(i, 1)[0]);
+      if (b.dataset.x === 'rm') list.splice(i, 1);
+      await saveRoutine(r);
+      closeSheet();
+      render();
+    });
+  });
+}
+
+/** Turn the exercises of a session into a routine. */
+async function saveSessionAsRoutine(session) {
+  const items = (session.entries || [])
+    .filter((e) => state.byId.has(e.exerciseId))
+    .map((e) => ({
+      exerciseId: e.exerciseId,
+      // Warmups are per-day, not part of the plan.
+      sets: Math.max(1, e.sets.filter((s) => !s.isWarmup).length),
+    }));
+  if (!items.length) {
+    toast('Nothing to save — every exercise here has been deleted');
+    return;
+  }
+  // Guess a name from the muscle group that dominates the session.
+  const tally = new Map();
+  for (const it of items) {
+    const g = (state.byId.get(it.exerciseId).muscleGroup || '').trim();
+    if (g && g !== 'Uncategorised') tally.set(g, (tally.get(g) || 0) + 1);
+  }
+  const suggested = [...tally.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)[0] || '';
+
+  const name = await promptSheet({
+    title: 'Save as routine',
+    body: `${items.length} exercise${items.length === 1 ? '' : 's'}, with the working sets you did today.`,
+    label: 'Routine name',
+    value: suggested,
+    placeholder: 'Push A, Legs, Upper…',
+  });
+  if (!name) return;
+
+  const r = { id: uid('r'), name, items, createdAt: Date.now(), updatedAt: Date.now(), lastUsedAt: null };
+  await db.saveRoutine(r);
+  state.routines = sortRoutines(state.routines.concat([r]));
+  toast(`Saved routine ${r.name}`, 'Edit', () => { location.hash = `#/routine/${r.id}`; });
+}
+
+/* ==========================================================================
    EXPORT / IMPORT
    ========================================================================== */
 
@@ -852,9 +1161,12 @@ async function doImportJson(input) {
     const { text } = await readFile(input);
     const data = JSON.parse(text);
     db.validateBackup(data);
+    const nRoutines = Array.isArray(data.routines) ? data.routines.length : 0;
     const ok = await confirmSheet({
       title: 'Replace everything?',
-      body: `This backup holds ${data.sessions.length} sessions and ${data.exercises.length} exercises. Importing replaces what is on this device now.`,
+      body: `This backup holds ${data.sessions.length} sessions, ${data.exercises.length} exercises${
+        nRoutines ? ` and ${nRoutines} routine${nRoutines === 1 ? '' : 's'}` : ''
+      }. Importing replaces what is on this device now.`,
       confirm: 'Replace', danger: true,
     });
     if (!ok) return;
@@ -1108,6 +1420,96 @@ document.addEventListener('click', async (e) => {
       editExerciseSheet(btn.dataset.id);
       break;
 
+    /* ---------------------------------------------------------- routines */
+
+    case 'start-routine':
+      await startRoutine(btn.dataset.id);
+      break;
+
+    case 'open-routine':
+      location.hash = `#/routine/${btn.dataset.id}`;
+      break;
+
+    case 'save-routine':
+      await saveSessionAsRoutine(sessionById(btn.dataset.id) || c.session);
+      break;
+
+    case 'new-routine': {
+      const name = await promptSheet({
+        title: 'New routine',
+        label: 'Routine name',
+        placeholder: 'Push A, Legs, Upper…',
+        confirm: 'Create',
+      });
+      if (!name) return;
+      const r = { id: uid('r'), name, items: [], createdAt: Date.now(), updatedAt: Date.now(), lastUsedAt: null };
+      await db.saveRoutine(r);
+      state.routines = sortRoutines(state.routines.concat([r]));
+      location.hash = `#/routine/${r.id}`;
+      break;
+    }
+
+    case 'rename-routine': {
+      const r = routineById(btn.dataset.id);
+      if (!r) return;
+      const name = await promptSheet({
+        title: 'Rename routine', label: 'Routine name', value: r.name,
+      });
+      if (!name) return;
+      r.name = name;
+      await saveRoutine(r);
+      render();
+      break;
+    }
+
+    case 'delete-routine': {
+      const r = routineById(btn.dataset.id);
+      if (!r) return;
+      const ok = await confirmSheet({
+        title: `Delete ${r.name}?`,
+        body: 'The routine is removed. Sessions you already logged from it are untouched.',
+        confirm: 'Delete', danger: true,
+      });
+      if (!ok) return;
+      await db.deleteRoutine(r.id);
+      state.routines = state.routines.filter((x) => x.id !== r.id);
+      location.hash = '#/routines';
+      toast('Routine deleted');
+      break;
+    }
+
+    case 'routine-add': {
+      const r = routineById(location.hash.replace('#/routine/', ''));
+      if (!r) return;
+      pickExercise(async (exerciseId) => {
+        r.items = (r.items || []).concat([{ exerciseId, sets: 3 }]);
+        await saveRoutine(r);
+        closeSheet();
+        render();
+      });
+      break;
+    }
+
+    case 'routine-sets': {
+      const r = routineById(location.hash.replace('#/routine/', ''));
+      const i = routineItemIndex(btn);
+      if (!r || i < 0) return;
+      const it = r.items[i];
+      it.sets = Math.max(1, Math.min(12, setCountOf(it) + Number(btn.dataset.d)));
+      // Patch the one number in place; a full render would drop the scroll position.
+      const out = $('.rt-n', btn.closest('[data-i]'));
+      if (out) out.innerHTML = `${it.sets}<em>sets</em>`;
+      await saveRoutine(r);
+      break;
+    }
+
+    case 'routine-item-menu': {
+      const r = routineById(location.hash.replace('#/routine/', ''));
+      const i = routineItemIndex(btn);
+      if (r && i >= 0) routineItemMenu(r, i);
+      break;
+    }
+
     case 'export':      doExport(); break;
     case 'import':      $('#file-json').click(); break;
     case 'import-csv':  $('#file-csv').click(); break;
@@ -1115,12 +1517,13 @@ document.addEventListener('click', async (e) => {
     case 'erase': {
       const ok = await confirmSheet({
         title: 'Erase everything?',
-        body: 'Every session, exercise and setting on this device is deleted. Export first if you might want any of it back.',
+        body: 'Every session, exercise, routine and setting on this device is deleted. Export first if you might want any of it back.',
         confirm: 'Erase everything', danger: true,
       });
       if (!ok) return;
       await db.clear(db.STORE_SE);
       await db.clear(db.STORE_EX);
+      await db.clear(db.STORE_RO);
       await reload();
       render();
       toast('All data erased');
