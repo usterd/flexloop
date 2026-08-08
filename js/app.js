@@ -1530,6 +1530,10 @@ document.addEventListener('click', async (e) => {
       break;
     }
 
+    case 'info':
+      infoSheet();
+      break;
+
     case 'dismiss-hint':
       localStorage.setItem('flexloop.a2hs', '1');
       btn.closest('.hint').remove();
@@ -1617,6 +1621,27 @@ $('#view').addEventListener('pointermove', (e) => {
 }, { passive: true });
 ['pointerup', 'pointercancel', 'scroll'].forEach((ev) =>
   $('#view').addEventListener(ev, () => { clearTimeout(pressTimer); pressOrigin = null; }, { passive: true }));
+
+/** Reference for gestures the UI doesn't otherwise explain — long-press above all. */
+function infoSheet() {
+  openSheet(`
+    <h2>How to edit a set</h2>
+    <p class="sub">The +/− steppers and the checkmark cover adding and finishing a
+      set. Everything else lives behind a long-press.</p>
+    <div class="info-list">
+      <div class="info-item"><span class="t">Long-press a set row</span>
+        <span class="s">Opens a menu to mark it a warmup, duplicate it, or delete it.
+          There's no swipe or edit button — deleting a set is always this.</span></div>
+      <div class="info-item"><span class="t">Tap the weight or reps number</span>
+        <span class="s">Type a value directly instead of stepping to it.</span></div>
+      <div class="info-item"><span class="t">Tap ••• on an exercise card</span>
+        <span class="s">Mark every set in it done at once, move it up or down, or
+          remove it from this session — the exercise itself is untouched.</span></div>
+      <div class="info-item"><span class="t">Tap an exercise's name</span>
+        <span class="s">Jumps to its chart on Progress → Per exercise.</span></div>
+    </div>
+    <button class="btn btn-block" style="margin-top:16px" data-close>Got it</button>`);
+}
 
 function setMenu(c) {
   if (!c.set) return;

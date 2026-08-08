@@ -104,6 +104,8 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
   gap: 12px;
 }
 
+.topbar-left { display: flex; align-items: center; gap: 6px; }
+
 .wordmark {
   margin: 0;
   font-size: 19px;
@@ -112,6 +114,29 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
   color: var(--chalk);
 }
 .wordmark span { color: var(--signal); }
+
+/* Small round glyph button — the info trigger today, reusable wherever the
+   topbar needs an icon-only action that isn't route-specific. */
+.icon-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px; height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+.icon-btn:active { background: var(--slab-2); color: var(--chalk); }
+.icon-btn svg {
+  width: 18px; height: 18px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
+}
 
 .topbar-action { display: flex; gap: 8px; align-items: center; }
 
@@ -542,6 +567,14 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .row .r em { display: block; font-style: normal; font-size: 10.5px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
 .row.stale .r { color: var(--danger); }
+
+/* Like .rows, but read-only — the info sheet's tip list. No pointer cursor,
+   no active-state flash, since tapping one does nothing. */
+.info-list { border: 1px solid var(--edge); border-radius: var(--r-md); overflow: hidden; background: var(--slab); margin-top: 14px; }
+.info-item { padding: 12px 14px; border-bottom: 1px solid var(--edge); }
+.info-item:last-child { border-bottom: 0; }
+.info-item .t { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; display: block; }
+.info-item .s { font-size: 12.5px; color: var(--dim); margin-top: 3px; display: block; line-height: 1.5; }
 
 /* -------------------------------------------------------------- routines */
 
