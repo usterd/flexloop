@@ -10,7 +10,7 @@
 
 import * as db from './db.js';
 import * as S from './stats.js';
-import { lineChart, barChart } from './charts.js';
+import { lineChart, barChart, setChart } from './charts.js';
 import { parseStrongifyCsv, looksLikeStrongify } from './importers.js';
 
 /* ------------------------------------------------------------------ state */
@@ -770,6 +770,12 @@ function renderExerciseProgress(root) {
       <div class="chart-wrap" id="c-1rm"></div>
     </div>
 
+    ${bodyweight ? '' : `<div class="card chart-card">
+      <div class="chart-head"><p class="eyebrow">Every set</p>
+        <span class="note">BARS ${esc(unit().toUpperCase())} · LINE REPS</span></div>
+      <div class="chart-wrap" id="c-sets"></div>
+    </div>`}
+
     <div class="card chart-card">
       <div class="chart-head"><p class="eyebrow">Volume per session</p><span class="note">WARMUPS EXCLUDED</span></div>
       <div class="chart-wrap" id="c-svol"></div>
@@ -813,6 +819,13 @@ function renderExerciseProgress(root) {
     })),
     { format: (v) => (bodyweight ? `${S.fmtNum(v, 0)} reps` : `${S.fmtNum(v, 1)} ${unit()}`),
       tickFormat: (v) => S.fmtNum(v, 0), empty });
+
+  if (!bodyweight) {
+    setChart($('#c-sets'),
+      series.map((p) => ({ x: p.ts, label: label(p), sets: p.sets })),
+      { height: 190, format: (v) => `${S.fmtNum(v)} ${unit()}`,
+        weightFormat: (v) => S.fmtNum(v, 1), repFormat: (v) => String(Math.round(v)), empty });
+  }
 
   barChart($('#c-svol'),
     series.map((p) => ({ x: p.ts, label: label(p), value: Math.round(p.volume), sub: label(p) })),
