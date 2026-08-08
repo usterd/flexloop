@@ -720,6 +720,8 @@ select.input {
 .chart .tick { fill: var(--dim); font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em; }
 .chart .line { fill: none; stroke: var(--signal); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
 .chart .area { fill: url(#loopfade); }
+/* The rest between two sessions — drawn, but not as if it were lifting. */
+.chart .link { stroke: var(--signal); stroke-width: 1.5; stroke-dasharray: 3 3; opacity: 0.45; }
 .chart .dot { fill: var(--ink); stroke: var(--signal); stroke-width: 2; }
 .chart .dot.on { fill: var(--signal); }
 .chart .bar { fill: var(--edge-hi); }
