@@ -8,7 +8,7 @@
    cache-first with no network fallback worth speaking of.
    ========================================================================= */
 
-const CACHE_VERSION = 'flexloop-v5';
+const CACHE_VERSION = 'flexloop-v6';
 
 /* Explicit list. Anything missing here is missing offline. */
 const SHELL = [

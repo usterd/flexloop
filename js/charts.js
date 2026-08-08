@@ -9,6 +9,67 @@
 const NS = 'http://www.w3.org/2000/svg';
 let uid = 0;
 
+/* Shared horizontal geometry -------------------------------------------------
+   Charts stacked on a screen are all the same width, so one set of horizontal
+   constants is what makes them line up: a session plotted on the 1RM line sits
+   directly above its bar in the volume chart. Bars are positioned from their
+   x value like line points are — never spread evenly by index — otherwise two
+   sessions a day apart look as far apart as two a month apart. */
+const PAD_L = 38;       // room for the y tick labels
+const PAD_R = 12;
+const X_INSET = 14;     // ≥ half the widest bar, so the edge bars never clip
+const BAR_MAX = 26;
+const LABEL_GAP = 52;   // minimum px between two x labels
+
+/**
+ * Map data x values onto the inner band. Identical for every chart type, so
+ * equal x values land on equal pixels.
+ * xs: Number[] — ascending. Returns { pos: px per point, a, b } band edges.
+ */
+function xLayout(xs, W) {
+  const a = PAD_L + X_INSET;
+  const b = W - PAD_R - X_INSET;
+  const lo = Math.min(...xs);
+  const hi = Math.max(...xs);
+  const span = hi - lo;
+  const pos = xs.map((v) => (span > 0 ? a + ((v - lo) / span) * (b - a) : (a + b) / 2));
+  return { pos, a, b };
+}
+
+/** Widest bar that still leaves a gap at the tightest pair of points. */
+function barWidth(pos, band) {
+  let gap = pos.length > 1 ? Infinity : band;
+  for (let i = 1; i < pos.length; i++) gap = Math.min(gap, pos[i] - pos[i - 1]);
+  return Math.max(3, Math.min(gap - 3, BAR_MAX));
+}
+
+/**
+ * Which points get an x label. Walks back from the newest — that one is always
+ * labelled — and keeps whatever clears LABEL_GAP, so labels never collide and
+ * two charts sharing an x scale label the same points.
+ */
+function xTickIndices(pos) {
+  const keep = [];
+  let last = Infinity;
+  for (let i = pos.length - 1; i >= 0; i--) {
+    if (last - pos[i] < LABEL_GAP) continue;
+    keep.push(i);
+    last = pos[i];
+  }
+  return keep.reverse();
+}
+
+/** One hit region per point, bounded by the midpoints to its neighbours. */
+function addHits(svg, pos, W, top, height, select) {
+  pos.forEach((x, i) => {
+    const l = i === 0 ? PAD_L : (pos[i - 1] + x) / 2;
+    const r = i === pos.length - 1 ? W - PAD_R : (x + pos[i + 1]) / 2;
+    const hit = svgEl('rect', { class: 'hit', x: l, y: top, width: Math.max(1, r - l), height });
+    hit.addEventListener('pointerdown', (e) => { e.stopPropagation(); select(i); });
+    svg.appendChild(hit);
+  });
+}
+
 function svgEl(tag, attrs = {}) {
   const n = document.createElementNS(NS, tag);
   for (const k in attrs) n.setAttribute(k, attrs[k]);
@@ -66,17 +127,13 @@ export function lineChart(wrap, points, opts = {}) {
     }
     const W = Math.max(240, wrap.clientWidth || 320);
     const H = opts.height || 190;
-    const pad = { t: 12, r: 10, b: 22, l: 38 };
-    const iw = W - pad.l - pad.r;
+    const pad = { t: 12, r: PAD_R, b: 22, l: PAD_L };
     const ih = H - pad.t - pad.b;
 
     const ys = points.map((p) => p.y);
     const { lo, hi, ticks } = niceTicks(Math.min(...ys), Math.max(...ys), 3);
-    const xs = points.map((p) => p.x);
-    const x0 = Math.min(...xs), x1 = Math.max(...xs);
-    const spanX = x1 - x0 || 1;
+    const { pos } = xLayout(points.map((p, i) => (p.x == null ? i : p.x)), W);
 
-    const px = (v) => pad.l + (points.length === 1 ? iw / 2 : ((v - x0) / spanX) * iw);
     const py = (v) => pad.t + ih - ((v - lo) / (hi - lo || 1)) * ih;
 
     wrap.innerHTML = '';
@@ -104,27 +161,22 @@ export function lineChart(wrap, points, opts = {}) {
     });
 
     if (points.length > 1) {
-      const d = points.map((p, i) => `${i ? 'L' : 'M'}${px(p.x).toFixed(1)},${py(p.y).toFixed(1)}`).join('');
-      const areaD = `${d}L${px(x1).toFixed(1)},${(pad.t + ih).toFixed(1)}L${px(x0).toFixed(1)},${(pad.t + ih).toFixed(1)}Z`;
+      const d = points.map((p, i) => `${i ? 'L' : 'M'}${pos[i].toFixed(1)},${py(p.y).toFixed(1)}`).join('');
+      const base = (pad.t + ih).toFixed(1);
+      const areaD = `${d}L${pos[pos.length - 1].toFixed(1)},${base}L${pos[0].toFixed(1)},${base}Z`;
       svg.appendChild(svgEl('path', { class: 'area', d: areaD, fill: `url(#${gid})` }));
       svg.appendChild(svgEl('path', { class: 'line', d }));
     }
 
-    // x labels: first, middle, last (only when they won't collide)
-    const idxs = points.length > 2 ? [0, Math.floor(points.length / 2), points.length - 1]
-      : points.map((_, i) => i);
-    [...new Set(idxs)].forEach((i) => {
+    xTickIndices(pos).forEach((i) => {
       const p = points[i];
-      const t = svgEl('text', {
-        class: 'tick', x: px(p.x), y: H - 6,
-        'text-anchor': i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle',
-      });
+      const t = svgEl('text', { class: 'tick', x: pos[i], y: H - 6, 'text-anchor': 'middle' });
       t.textContent = p.xlab != null ? p.xlab : String(p.label || '');
       svg.appendChild(t);
     });
 
-    const dots = points.map((p) => {
-      const c = svgEl('circle', { class: 'dot', cx: px(p.x), cy: py(p.y), r: points.length > 40 ? 2 : 3.5 });
+    const dots = points.map((p, i) => {
+      const c = svgEl('circle', { class: 'dot', cx: pos[i], cy: py(p.y), r: points.length > 40 ? 2 : 3.5 });
       svg.appendChild(c);
       return c;
     });
@@ -136,23 +188,13 @@ export function lineChart(wrap, points, opts = {}) {
       const p = points[i];
       tip.textContent = `${opts.format ? opts.format(p.y) : p.y}  ·  ${p.label}`;
       tip.hidden = false;
-      tip.style.left = `${Math.min(Math.max(px(p.x), 46), W - 46)}px`;
+      tip.style.left = `${Math.min(Math.max(pos[i], 46), W - 46)}px`;
       tip.style.top = `${py(p.y)}px`;
     };
 
-    // One wide hit rect per point beats tiny circles under a thumb.
-    points.forEach((p, i) => {
-      const half = points.length === 1 ? iw / 2 : iw / (points.length - 1) / 2;
-      const hit = svgEl('rect', {
-        class: 'hit',
-        x: Math.max(pad.l, px(p.x) - Math.max(half, 12)),
-        y: pad.t,
-        width: Math.max(half * 2, 24),
-        height: ih,
-      });
-      hit.addEventListener('pointerdown', (e) => { e.stopPropagation(); select(i); });
-      svg.appendChild(hit);
-    });
+    // Hit regions rather than the tiny circles themselves — a thumb is wider
+    // than a dot.
+    addHits(svg, pos, W, pad.t, ih, select);
 
     svg.addEventListener('pointerleave', () => select(null));
     wrap.appendChild(svg);
@@ -166,7 +208,9 @@ export function lineChart(wrap, points, opts = {}) {
 /* ------------------------------------------------------------- bar chart */
 
 /**
- * bars: [{ label, value, sub }]
+ * bars: [{ x: Number (ms timestamp or index, optional), label, value, sub }]
+ *       Pass `x` whenever the bars share a timeline with a line chart above or
+ *       below them; without it the bars fall back to evenly spaced indices.
  * opts: { height, format(v), highlightLast }
  */
 export function barChart(wrap, bars, opts = {}) {
@@ -174,16 +218,15 @@ export function barChart(wrap, bars, opts = {}) {
     if (!bars || bars.length === 0) return emptyState(wrap, opts.empty || 'Nothing to chart yet.');
     const W = Math.max(240, wrap.clientWidth || 320);
     const H = opts.height || 150;
-    const pad = { t: 10, r: 8, b: 20, l: 38 };
-    const iw = W - pad.l - pad.r;
+    const pad = { t: 10, r: PAD_R, b: 20, l: PAD_L };
     const ih = H - pad.t - pad.b;
 
     const max = Math.max(...bars.map((b) => b.value), 0);
     const { hi, ticks } = niceTicks(0, max || 1, 2, !!opts.integer);
     const py = (v) => pad.t + ih - (v / (hi || 1)) * ih;
 
-    const slot = iw / bars.length;
-    const bw = Math.max(4, Math.min(slot - 4, 26));
+    const { pos, a, b: bandEnd } = xLayout(bars.map((b, i) => (b.x == null ? i : b.x)), W);
+    const bw = barWidth(pos, bandEnd - a);
 
     wrap.innerHTML = '';
     const svg = svgEl('svg', {
@@ -200,28 +243,22 @@ export function barChart(wrap, bars, opts = {}) {
     });
 
     const rects = bars.map((b, i) => {
-      const cx = pad.l + slot * i + slot / 2;
       const y = py(b.value);
       const r = svgEl('rect', {
         class: 'bar' + (opts.highlightLast && i === bars.length - 1 ? ' on' : ''),
-        x: cx - bw / 2,
+        x: pos[i] - bw / 2,
         y: b.value > 0 ? y : pad.t + ih - 1,
         width: bw,
         height: b.value > 0 ? Math.max(2, pad.t + ih - y) : 1,
-        rx: 3,
+        rx: Math.min(3, bw / 2),
       });
       svg.appendChild(r);
       return r;
     });
 
-    // Label roughly every nth bar so they never overlap.
-    // Count back from the last bar: the newest one always gets a label and
-    // the spacing stays even, so nothing collides at the right edge.
-    const every = Math.ceil(bars.length / Math.max(2, Math.floor(iw / 52)));
-    bars.forEach((b, i) => {
-      if ((bars.length - 1 - i) % every !== 0) return;
-      const t = svgEl('text', { class: 'tick', x: pad.l + slot * i + slot / 2, y: H - 6, 'text-anchor': 'middle' });
-      t.textContent = b.label;
+    xTickIndices(pos).forEach((i) => {
+      const t = svgEl('text', { class: 'tick', x: pos[i], y: H - 6, 'text-anchor': 'middle' });
+      t.textContent = bars[i].label;
       svg.appendChild(t);
     });
 
@@ -232,15 +269,11 @@ export function barChart(wrap, bars, opts = {}) {
       const b = bars[i];
       tip.textContent = `${opts.format ? opts.format(b.value) : b.value}  ·  ${b.sub || b.label}`;
       tip.hidden = false;
-      tip.style.left = `${Math.min(Math.max(pad.l + slot * i + slot / 2, 50), W - 50)}px`;
+      tip.style.left = `${Math.min(Math.max(pos[i], 50), W - 50)}px`;
       tip.style.top = `${py(b.value)}px`;
     };
 
-    bars.forEach((b, i) => {
-      const hit = svgEl('rect', { class: 'hit', x: pad.l + slot * i, y: pad.t, width: slot, height: ih });
-      hit.addEventListener('pointerdown', (e) => { e.stopPropagation(); select(i); });
-      svg.appendChild(hit);
-    });
+    addHits(svg, pos, W, pad.t, ih, select);
 
     svg.addEventListener('pointerleave', () => select(null));
     wrap.appendChild(svg);

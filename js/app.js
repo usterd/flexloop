@@ -723,12 +723,12 @@ function renderOverview(root) {
         <span class="r">${days}<em>days</em></span>
       </button>`).join('')}</div>`;
 
-  barChart($('#c-sess'), buckets.map((b) => ({ label: b.label, value: b.sessions, sub: `week of ${b.label}` })), {
+  barChart($('#c-sess'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: b.sessions, sub: `week of ${b.label}` })), {
     height: 140, highlightLast: true, integer: true,
     format: (v) => `${v} session${v === 1 ? '' : 's'}`,
     tickFormat: (v) => String(Math.round(v)),
   });
-  barChart($('#c-vol'), buckets.map((b) => ({ label: b.label, value: Math.round(b.volume), sub: `week of ${b.label}` })), {
+  barChart($('#c-vol'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: Math.round(b.volume), sub: `week of ${b.label}` })), {
     height: 150, highlightLast: true, format: (v) => S.fmtVolume(v, unit()),
     tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))),
   });
@@ -815,7 +815,7 @@ function renderExerciseProgress(root) {
       tickFormat: (v) => S.fmtNum(v, 0), empty });
 
   barChart($('#c-svol'),
-    series.map((p) => ({ label: label(p), value: Math.round(p.volume), sub: label(p) })),
+    series.map((p) => ({ x: p.ts, label: label(p), value: Math.round(p.volume), sub: label(p) })),
     { format: (v) => S.fmtVolume(v, unit()), height: 140, highlightLast: true,
       tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty });
 
