@@ -231,6 +231,40 @@ body.has-rest .view { padding-bottom: 96px; }
   line-height: 1.25;
 }
 
+/* Title as a link into that exercise's Progress charts. The chart glyph is
+   the only affordance — an underline here would read as a typo, not a tap. */
+.title-jump {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  /* Padding grows the thumb target; the negative margin keeps the ghost
+     line exactly where it sat before. */
+  padding: 3px 0;
+  margin: -3px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.title-jump > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.title-jump svg {
+  flex: none;
+  width: 15px; height: 15px;
+  fill: none; stroke: var(--dim);
+  stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+}
+.title-jump:active { color: var(--signal); }
+.title-jump:active svg { stroke: var(--signal); }
+
 /* The ghost: previous session, in dim mono, always on screen. */
 .ghost {
   font-family: var(--mono);

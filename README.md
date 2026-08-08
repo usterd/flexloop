@@ -79,8 +79,9 @@ Run this once after installing. It takes about three minutes.
    mark the set done. The rest timer should start.
 7. **Check the ghost.** Add the same exercise again in a new session. The
    "Last …" line under its name must show what you just did.
-8. **Render a chart.** Go to Progress → Per exercise. The estimated 1RM chart
-   should draw. Tap a point; a tooltip appears.
+8. **Render a chart.** Tap the exercise's name on its card in the Log. Progress →
+   Per exercise should open on that exercise and the estimated 1RM chart should
+   draw. Tap a point; a tooltip appears.
 9. **Reboot the phone.** Still in airplane mode, relaunch from the Home Screen.
    Everything from steps 6–8 must still be there.
 10. **Export.** Turn airplane mode off, go to Data → Export backup, and confirm a
@@ -141,6 +142,12 @@ stepper. The one deliberate flourish is the **ghost line**: last session's weigh
 and reps sit under every exercise as you log, in dim mono, so the loop from last
 time to this time is always on screen without a tap. That is also why new sets
 prefill themselves — typing should be rare.
+
+Tapping an exercise's **name** on a card — while logging, or in any saved session —
+opens Progress → Per exercise on that exercise. The small chart glyph beside the
+name is the affordance; the name itself is not underlined, which on a card reads
+as an error rather than a link. A name shown as *Removed exercise* is plain text,
+since there is nothing left to chart.
 
 ## Assumptions made while building
 

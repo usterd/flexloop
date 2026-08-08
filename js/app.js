@@ -272,11 +272,24 @@ function setRowHtml(entry, set, si) {
   </div>`;
 }
 
+/** The card title. Tappable when the exercise still exists — it jumps
+    straight to that exercise's charts on Progress. */
+function entryTitleHtml(entry) {
+  const ex = state.byId.get(entry.exerciseId);
+  if (!ex) return `<h3 class="card-title">${esc(exName(entry.exerciseId))}</h3>`;
+  return `<h3 class="card-title"><button type="button" class="title-jump"
+      data-act="jump-exercise" data-id="${esc(ex.id)}"
+      aria-label="${esc(ex.name)} — see progress">
+      <span>${esc(ex.name)}</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-6 4 4 7-8"/></svg>
+    </button></h3>`;
+}
+
 function entryHtml(session, entry, ei) {
   return `<section class="card" data-entry="${ei}">
     <div class="card-head">
       <div style="min-width:0">
-        <h3 class="card-title">${esc(exName(entry.exerciseId))}</h3>
+        ${entryTitleHtml(entry)}
         ${ghostHtml(session, entry)}
       </div>
       <button class="btn btn-sm btn-quiet" data-act="entry-menu" aria-label="Exercise options">•••</button>
@@ -1063,13 +1076,18 @@ document.addEventListener('click', async (e) => {
       break;
     }
 
-    case 'jump-exercise':
-      state.progressEx = btn.dataset.id;
+    case 'jump-exercise': {
+      const id = btn.dataset.id;
+      if (!state.byId.has(id)) { toast('That exercise is no longer in your list'); return; }
+      state.progressEx = id;
       state.progressTab = 'exercise';
-      localStorage.setItem('flexloop.progressEx', state.progressEx);
+      localStorage.setItem('flexloop.progressEx', id);
       localStorage.setItem('flexloop.progressTab', 'exercise');
-      render();
+      // Assigning the same hash fires no hashchange, so render by hand there.
+      if (location.hash === '#/progress') render();
+      else location.hash = '#/progress';
       break;
+    }
 
     case 'choose-progress-ex':
       pickExercise((id) => {
