@@ -87,8 +87,8 @@ Run this once after installing. It takes about three minutes.
    "Start from a routine" on the Log. Tap it — the sets should already be there.
 10. **Reboot the phone.** Still in airplane mode, relaunch from the Home Screen.
     Everything from steps 6–9 must still be there.
-11. **Export.** Turn airplane mode off, go to Data → Export backup, and confirm a
-    `flexloop-YYYY-MM-DD.json` lands in your Files app.
+11. **Export:** go to Data → Export backup and confirm a `flexloop-YYYY-MM-DD.json`
+    lands in your Files app. (export never touches the network)
 
 Step 11 is not optional. iOS clears the storage of sites it considers unused, and
 an installed Home Screen app reduces that risk without removing it. The exported
