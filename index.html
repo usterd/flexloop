@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>flexloop</title>
+
+<!-- viewport-fit=cover lets us paint into the notch / home-indicator area,
+     which we then pad back with env(safe-area-inset-*) in CSS. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#08090B">
+<meta name="description" content="Offline gym journal.">
+
+<!-- iOS standalone mode. The first is legacy-but-still-required on iOS;
+     the second is the standardised replacement. Ship both. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="flexloop">
+<meta name="format-detection" content="telephone=no">
+
+<!-- iOS ignores manifest icons for the Home Screen and uses this instead. -->
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<!-- Rest timer + update banner live above the nav, out of the scroll flow. -->
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <h1 class="wordmark">flex<span>loop</span></h1>
+    <div id="topbar-action" class="topbar-action"></div>
+  </div>
+</header>
+
+<main id="view" class="view" tabindex="-1"></main>
+
+<div id="rest" class="rest" hidden>
+  <div class="rest-bar"><i id="rest-fill"></i></div>
+  <div class="rest-row">
+    <span class="rest-label">Rest</span>
+    <span id="rest-clock" class="rest-clock">0:00</span>
+    <button id="rest-add" class="rest-btn" type="button">+30s</button>
+    <button id="rest-skip" class="rest-btn" type="button">Skip</button>
+  </div>
+</div>
+
+<nav class="tabs" id="tabs">
+  <a href="#/log"      data-tab="log"      class="tab">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6M8 6v12M16 6v12M20 9v6M8 12h8"/></svg>
+    <span>Log</span>
+  </a>
+  <a href="#/history"  data-tab="history"  class="tab">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    <span>History</span>
+  </a>
+  <a href="#/progress" data-tab="progress" class="tab">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-6 4 4 7-8"/></svg>
+    <span>Progress</span>
+  </a>
+  <a href="#/data"     data-tab="data"     class="tab">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 11l4 4 4-4M4 19h16"/></svg>
+    <span>Data</span>
+  </a>
+</nav>
+
+<!-- Full-screen sheet used for exercise picker, confirmations, editors. -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-scrim" data-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <div class="sheet-grab"></div>
+    <div id="sheet-body"></div>
+  </div>
+</div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
