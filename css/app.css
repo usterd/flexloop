@@ -311,6 +311,24 @@ body.has-rest .view { padding-bottom: 96px; }
 
 /* ------------------------------------------------------------- set rows */
 
+/* Column labels for the set grid below. Same columns as .set so "KG" and
+   "Reps" sit exactly over the box they describe — the whole point. */
+.set-head {
+  display: grid;
+  grid-template-columns: 22px 1fr 1fr 46px;
+  gap: 8px;
+  padding: 0 12px 5px 10px;
+}
+.set-head span {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+  text-align: center;
+  text-transform: uppercase;
+}
+
 .sets { border-top: 1px solid var(--edge); }
 
 .set {

@@ -379,6 +379,16 @@ function entryTitleHtml(entry) {
     </button></h3>`;
 }
 
+/** Column labels over the steppers, so a weight box never looks like a rep box. */
+function setHeadHtml() {
+  return `<div class="set-head" aria-hidden="true">
+    <span></span>
+    <span>${esc(unit().toUpperCase())}</span>
+    <span>Reps</span>
+    <span></span>
+  </div>`;
+}
+
 function entryHtml(session, entry, ei) {
   return `<section class="card" data-entry="${ei}">
     <div class="card-head">
@@ -388,6 +398,7 @@ function entryHtml(session, entry, ei) {
       </div>
       <button class="btn btn-sm btn-quiet" data-act="entry-menu" aria-label="Exercise options">•••</button>
     </div>
+    ${entry.sets.length ? setHeadHtml() : ''}
     <div class="sets">${entry.sets.map((s, i) => setRowHtml(entry, s, i)).join('')}</div>
     <div class="set-foot">
       <button class="btn btn-sm" data-act="add-set" style="flex:1">+ Set</button>
