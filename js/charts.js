@@ -115,6 +115,12 @@ function pairTicks(a, b, count = 3) {
 }
 
 function emptyState(wrap, message) {
+  // Nothing is selectable any more, so let go of the previous drawing's
+  // listeners and its seat in the sync group.
+  if (wrap.__unbind) wrap.__unbind();
+  wrap.__unbind = null;
+  wrap.__clear = null;
+  leaveGroup(wrap);
   wrap.innerHTML = '';
   const d = document.createElement('div');
   d.className = 'empty';
@@ -134,11 +140,118 @@ function makeTip(wrap) {
   return tip;
 }
 
+/* ----------------------------------------------------- selection and sync */
+
+/* Charts stacked in one view read as a single figure, so they share a
+   selection: pick a session in any of them and the others mark the same
+   session. Membership is by group key, passed in as `opts.sync`. Entries are
+   dropped when their wrap leaves the document — a re-render builds fresh
+   wraps rather than reusing the old ones — so nothing has to be torn down by
+   hand when the view changes. */
+const syncGroups = new Map();
+const NONE = new Set();
+
+function joinGroup(key, entry) {
+  // A redraw replaces the wrap's entry instead of stacking a second one on it.
+  leaveGroup(entry.wrap);
+  if (!key) return;
+  let members = syncGroups.get(key);
+  if (!members) syncGroups.set(key, (members = []));
+  members.push(entry);
+  entry.wrap.__syncKey = key;
+}
+
+function leaveGroup(wrap) {
+  const key = wrap.__syncKey;
+  if (!key) return;
+  const members = syncGroups.get(key) || [];
+  const i = members.findIndex((m) => m.wrap === wrap);
+  if (i >= 0) members.splice(i, 1);
+  wrap.__syncKey = null;
+}
+
+function broadcast(key, x, from) {
+  const members = syncGroups.get(key);
+  if (!members) return;
+  for (let i = members.length - 1; i >= 0; i--) {
+    const m = members[i];
+    if (!m.wrap.isConnected) { members.splice(i, 1); continue; }
+    if (m !== from) m.follow(x);
+  }
+}
+
+/**
+ * Hit regions, tooltip lifecycle and cross-chart highlighting for one chart.
+ *
+ * cfg: {
+ *   svg, W, top, height        — plot geometry
+ *   pos:  Number[]             — px centre of every selectable item
+ *   xs:   Number[]             — the session x behind each item. Items sharing
+ *                                an x light up together when a sibling chart
+ *                                selects that session — one session is several
+ *                                bars in the per-set chart.
+ *   paint(Set<Number>)         — highlight exactly these item indices
+ *   describe(i) -> { text, left, top }  — tooltip content and anchor
+ *   sync: String|null          — group key, or null for a standalone chart
+ * }
+ */
+function bindSelection(wrap, cfg) {
+  const { svg, W, top, height, pos, xs, paint, describe, sync } = cfg;
+  const tip = makeTip(wrap);
+
+  const clear = () => { paint(NONE); tip.hidden = true; };
+
+  // Chosen here: highlight, show the tooltip, and tell the rest of the group.
+  const select = (i) => {
+    if (i == null) { clear(); broadcast(sync, null, entry); return; }
+    paint(new Set([i]));
+    const d = describe(i);
+    tip.textContent = d.text;
+    tip.hidden = false;
+    tip.style.left = `${d.left}px`;
+    tip.style.top = `${d.top}px`;
+    broadcast(sync, xs[i], entry);
+  };
+
+  // Chosen in a sibling chart: mark the same session, but only the chart under
+  // the thumb carries a tooltip.
+  const follow = (x) => {
+    tip.hidden = true;
+    if (x == null) return paint(NONE);
+    const sel = new Set();
+    xs.forEach((v, j) => { if (v === x) sel.add(j); });
+    paint(sel);
+  };
+
+  const entry = { wrap, follow };
+  joinGroup(sync, entry);
+
+  // Hit regions rather than the marks themselves — a thumb is wider than a dot.
+  addHits(svg, pos, W, top, height, select);
+
+  if (wrap.__unbind) wrap.__unbind();
+  // A touch ends by lifting off the chart, which is nothing like a mouse
+  // leaving it: on a phone the point stays selected until something else is
+  // picked or tapped, so the reading survives the thumb being lifted out of
+  // the way. A cancel is the browser taking the gesture over for a scroll —
+  // that was never a selection, so it drops.
+  const onLeave = (e) => { if (e.pointerType === 'mouse') select(null); };
+  const onCancel = () => select(null);
+  wrap.addEventListener('pointerleave', onLeave);
+  wrap.addEventListener('pointercancel', onCancel);
+  wrap.__unbind = () => {
+    wrap.removeEventListener('pointerleave', onLeave);
+    wrap.removeEventListener('pointercancel', onCancel);
+  };
+  wrap.__clear = clear;
+}
+
 /* ------------------------------------------------------------ line chart */
 
 /**
  * points: [{ x: Number (ms timestamp or index), y: Number, label: String }]
- * opts:   { height, format(y) -> String, xLabel(point) -> String }
+ * opts:   { height, format(y) -> String, xLabel(point) -> String, sync }
+ *         `sync` is a group key: charts sharing one highlight the same x.
  */
 export function lineChart(wrap, points, opts = {}) {
   const draw = () => {
@@ -201,24 +314,21 @@ export function lineChart(wrap, points, opts = {}) {
       return c;
     });
 
-    const tip = makeTip(wrap);
-    const select = (i) => {
-      dots.forEach((d, j) => d.classList.toggle('on', j === i));
-      if (i == null) { tip.hidden = true; return; }
-      const p = points[i];
-      tip.textContent = `${opts.format ? opts.format(p.y) : p.y}  ·  ${p.label}`;
-      tip.hidden = false;
-      tip.style.left = `${Math.min(Math.max(pos[i], 46), W - 46)}px`;
-      tip.style.top = `${py(p.y)}px`;
-    };
+    bindSelection(wrap, {
+      svg, W, top: pad.t, height: ih, pos, sync: opts.sync,
+      xs: points.map((p, i) => (p.x == null ? i : p.x)),
+      paint: (sel) => dots.forEach((d, j) => d.classList.toggle('on', sel.has(j))),
+      describe: (i) => {
+        const p = points[i];
+        return {
+          text: `${opts.format ? opts.format(p.y) : p.y}  ·  ${p.label}`,
+          left: Math.min(Math.max(pos[i], 46), W - 46),
+          top: py(p.y),
+        };
+      },
+    });
 
-    // Hit regions rather than the tiny circles themselves — a thumb is wider
-    // than a dot.
-    addHits(svg, pos, W, pad.t, ih, select);
-
-    svg.addEventListener('pointerleave', () => select(null));
     wrap.appendChild(svg);
-    wrap.__clear = () => select(null);
   };
 
   draw();
@@ -231,7 +341,7 @@ export function lineChart(wrap, points, opts = {}) {
  * bars: [{ x: Number (ms timestamp or index, optional), label, value, sub }]
  *       Pass `x` whenever the bars share a timeline with a line chart above or
  *       below them; without it the bars fall back to evenly spaced indices.
- * opts: { height, format(v), highlightLast }
+ * opts: { height, format(v), highlightLast, sync }
  */
 export function barChart(wrap, bars, opts = {}) {
   const draw = () => {
@@ -282,22 +392,23 @@ export function barChart(wrap, bars, opts = {}) {
       svg.appendChild(t);
     });
 
-    const tip = makeTip(wrap);
-    const select = (i) => {
-      rects.forEach((r, j) => r.classList.toggle('on', j === i || (opts.highlightLast && i == null && j === bars.length - 1)));
-      if (i == null) { tip.hidden = true; return; }
-      const b = bars[i];
-      tip.textContent = `${opts.format ? opts.format(b.value) : b.value}  ·  ${b.sub || b.label}`;
-      tip.hidden = false;
-      tip.style.left = `${Math.min(Math.max(pos[i], 50), W - 50)}px`;
-      tip.style.top = `${py(b.value)}px`;
-    };
+    bindSelection(wrap, {
+      svg, W, top: pad.t, height: ih, pos, sync: opts.sync,
+      xs: bars.map((b, i) => (b.x == null ? i : b.x)),
+      // With nothing picked the newest bar keeps its standing highlight.
+      paint: (sel) => rects.forEach((r, j) => r.classList.toggle(
+        'on', sel.has(j) || (opts.highlightLast && sel.size === 0 && j === bars.length - 1))),
+      describe: (i) => {
+        const b = bars[i];
+        return {
+          text: `${opts.format ? opts.format(b.value) : b.value}  ·  ${b.sub || b.label}`,
+          left: Math.min(Math.max(pos[i], 50), W - 50),
+          top: py(b.value),
+        };
+      },
+    });
 
-    addHits(svg, pos, W, pad.t, ih, select);
-
-    svg.addEventListener('pointerleave', () => select(null));
     wrap.appendChild(svg);
-    wrap.__clear = () => select(null);
   };
 
   draw();
@@ -313,7 +424,7 @@ export function barChart(wrap, bars, opts = {}) {
  * because nothing was lifted in between.
  *
  * groups: [{ x: Number (ms timestamp), label, sets: [{ weight, reps }] }]
- * opts:   { height, weightFormat(v), repFormat(v), empty }
+ * opts:   { height, weightFormat(v), repFormat(v), empty, sync }
  */
 export function setChart(wrap, groups, opts = {}) {
   const draw = () => {
@@ -342,7 +453,8 @@ export function setChart(wrap, groups, opts = {}) {
     const pyR = (v) => pad.t + ih - ((v - R.lo) / (R.hi - R.lo || 1)) * ih;
     const pyK = (v) => pad.t + ih - ((v - K.lo) / (K.hi - K.lo || 1)) * ih;
 
-    const { pos, a, b } = xLayout(live.map((g, i) => (g.x == null ? i : g.x)), W);
+    const gxs = live.map((g, i) => (g.x == null ? i : g.x));
+    const { pos, a, b } = xLayout(gxs, W);
 
     // One pitch for every set in the chart, so a bar means the same width
     // everywhere. Bounded twice: by the tightest session gap, so neighbouring
@@ -361,6 +473,7 @@ export function setChart(wrap, groups, opts = {}) {
       g.sets.forEach((s, j) => {
         marks.push({
           cx: start + pitch * (j + 0.5),
+          x: gxs[i],
           set: s,
           group: g,
           setNo: j + 1,
@@ -432,24 +545,29 @@ export function setChart(wrap, groups, opts = {}) {
       svg.appendChild(t);
     });
 
-    const tip = makeTip(wrap);
-    const select = (i) => {
-      dots.forEach((d, j) => d.classList.toggle('on', j === i));
-      rects.forEach((r, j) => r.classList.toggle('on', j === i));
-      if (i == null) { tip.hidden = true; return; }
-      const m = marks[i];
-      const w = opts.format ? opts.format(Number(m.set.weight) || 0) : m.set.weight;
-      tip.textContent = `${w} × ${m.set.reps}  ·  set ${m.setNo}  ·  ${m.group.label}`;
-      tip.hidden = false;
-      tip.style.left = `${Math.min(Math.max(m.cx, 60), W - 60)}px`;
-      tip.style.top = `${Math.min(pyR(Number(m.set.reps) || 0), pyK(Number(m.set.weight) || 0))}px`;
-    };
+    // Selected from a sibling chart the unit is the session, so every set of
+    // that session lights up; selected here it is the one set under the thumb.
+    bindSelection(wrap, {
+      svg, W, top: pad.t, height: ih,
+      pos: marks.map((m) => m.cx),
+      xs: marks.map((m) => m.x),
+      sync: opts.sync,
+      paint: (sel) => {
+        dots.forEach((d, j) => d.classList.toggle('on', sel.has(j)));
+        rects.forEach((r, j) => r.classList.toggle('on', sel.has(j)));
+      },
+      describe: (i) => {
+        const m = marks[i];
+        const w = opts.format ? opts.format(Number(m.set.weight) || 0) : m.set.weight;
+        return {
+          text: `${w} × ${m.set.reps}  ·  set ${m.setNo}  ·  ${m.group.label}`,
+          left: Math.min(Math.max(m.cx, 60), W - 60),
+          top: Math.min(pyR(Number(m.set.reps) || 0), pyK(Number(m.set.weight) || 0)),
+        };
+      },
+    });
 
-    addHits(svg, marks.map((m) => m.cx), W, pad.t, ih, select);
-
-    svg.addEventListener('pointerleave', () => select(null));
     wrap.appendChild(svg);
-    wrap.__clear = () => select(null);
   };
 
   draw();

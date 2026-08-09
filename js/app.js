@@ -810,6 +810,9 @@ function renderExerciseProgress(root) {
   // `label` is the tooltip text, `xlab` the short form printed on the axis.
   const label = (p) => S.fmtDate(p.date);
   const empty = 'No sessions in this window. Try a wider range.';
+  // Every chart here plots the same sessions on the same x scale, so they act
+  // as one figure: picking a session in any of them marks it in all of them.
+  const sync = 'progress-exercise';
 
   lineChart($('#c-1rm'),
     series.map((p) => ({
@@ -818,24 +821,24 @@ function renderExerciseProgress(root) {
       label: label(p), xlab: label(p),
     })),
     { format: (v) => (bodyweight ? `${S.fmtNum(v, 0)} reps` : `${S.fmtNum(v, 1)} ${unit()}`),
-      tickFormat: (v) => S.fmtNum(v, 0), empty });
+      tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
 
   if (!bodyweight) {
     setChart($('#c-sets'),
       series.map((p) => ({ x: p.ts, label: label(p), sets: p.sets })),
       { height: 190, format: (v) => `${S.fmtNum(v)} ${unit()}`,
-        weightFormat: (v) => S.fmtNum(v, 1), repFormat: (v) => String(Math.round(v)), empty });
+        weightFormat: (v) => S.fmtNum(v, 1), repFormat: (v) => String(Math.round(v)), empty, sync });
   }
 
   barChart($('#c-svol'),
     series.map((p) => ({ x: p.ts, label: label(p), value: Math.round(p.volume), sub: label(p) })),
     { format: (v) => S.fmtVolume(v, unit()), height: 140, highlightLast: true,
-      tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty });
+      tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty, sync });
 
   if (!bodyweight) {
     lineChart($('#c-top'),
       series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${label(p)} · ${p.topWeightReps} reps`, xlab: label(p) })),
-      { format: (v) => `${S.fmtNum(v)} ${unit()}`, tickFormat: (v) => S.fmtNum(v, 0), empty });
+      { format: (v) => `${S.fmtNum(v)} ${unit()}`, tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
   }
 }
 
