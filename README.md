@@ -156,6 +156,17 @@ an origin. `python3 -m http.server` is enough for local work.)
   the formula is printed on the chart.
 - **Volume** — `Σ weight × reps` across completed sets. Warmups are excluded
   everywhere, including from personal records.
+- **Volume trend line** — the moving average drawn over *Volume per session* in
+  Progress → Per exercise. **Data → Preferences → Volume trend line** picks
+  between none, a simple average and an exponential one, and how many sessions
+  it runs over (5 by default). The exponential average weights recent sessions
+  more heavily (`k = 2 / (n + 1)`) and is seeded with the simple average of its
+  first window, so both kinds begin at the same session and the same number.
+  Nothing is drawn until there are as many sessions as the average asks for —
+  the chart's label says `NEEDS 5+` until then, rather than plotting a partial
+  average that would look like a trend. The average always runs over the whole
+  history and is then cut to the window on screen, so switching 1M/3M/6M moves
+  the view without changing the line.
 - **Heaviest at each rep count** — the heaviest set that reached *at least* that many
   reps, so a 5-rep PR is never beaten only on a technicality.
 - **Week streak** — consecutive Monday-anchored weeks containing at least one
@@ -183,6 +194,12 @@ since there is nothing left to chart.
   390px screen. The field is there if you want it back.
 - Charts are hand-written SVG rather than a vendored library — no dependency, and
   full control of styling.
+- Nothing on a chart is highlighted until you tap it. A bar chart used to leave
+  its newest bar lit by default, which read as a selection nobody had made and
+  put a tooltip-less highlight on screen at all times.
+- The trend line is drawn in chalk, not in the accent: orange already means
+  "this is the bar you tapped", and a trend in the same colour would read as a
+  selection stretched across the whole chart.
 - Deleting a set is a **long-press** on the set row (which also offers warmup and
   duplicate) rather than a swipe, because swipe conflicts with page scrolling.
 - A session left open for more than 18 hours is closed automatically, so a workout

@@ -724,14 +724,39 @@ function renderOverview(root) {
       </button>`).join('')}</div>`;
 
   barChart($('#c-sess'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: b.sessions, sub: `week of ${b.label}` })), {
-    height: 140, highlightLast: true, integer: true,
+    height: 140, integer: true,
     format: (v) => `${v} session${v === 1 ? '' : 's'}`,
     tickFormat: (v) => String(Math.round(v)),
   });
   barChart($('#c-vol'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: Math.round(b.volume), sub: `week of ${b.label}` })), {
-    height: 150, highlightLast: true, format: (v) => S.fmtVolume(v, unit()),
+    height: 150, format: (v) => S.fmtVolume(v, unit()),
     tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))),
   });
+}
+
+/**
+ * The trend overlay for "Volume per session", as chosen in Data → Preferences.
+ * Returns null when the preference is off.
+ *
+ * The average runs over the exercise's whole history and is only then cut to
+ * the window on screen, so the line is already warmed up at the left edge
+ * instead of starting a few sessions in every time the window changes.
+ */
+function volumeTrend(full, series) {
+  const mode = S.maMode(state.settings.volumeTrend);
+  if (mode.id === 'off') return null;
+  const period = S.maPeriod(state.settings.volumeTrendPeriod);
+  const ma = S.movingAverage(full.map((p) => p.volume), period, mode.id);
+  const bySession = new Map(full.map((p, i) => [p.sessionId, ma[i]]));
+  const values = series.map((p) => (bySession.has(p.sessionId) ? bySession.get(p.sessionId) : null));
+  return {
+    label: `${mode.short} ${period}`,
+    period,
+    values,
+    // Fewer sessions than the average asks for: the label says so rather than
+    // leaving a switched-on setting looking broken.
+    ready: values.some((v) => v != null),
+  };
 }
 
 function renderExerciseProgress(root) {
@@ -751,6 +776,7 @@ function renderExerciseProgress(root) {
   const series = S.filterWindow(full, state.progressWindow);
   const bodyweight = S.seriesIsBodyweight(full);
   const pr = S.personalRecords(full);
+  const trend = volumeTrend(full, series);
 
   root.innerHTML = `
     <button class="btn btn-block" data-act="choose-progress-ex" style="justify-content:space-between">
@@ -777,7 +803,10 @@ function renderExerciseProgress(root) {
     </div>`}
 
     <div class="card chart-card">
-      <div class="chart-head"><p class="eyebrow">Volume per session</p><span class="note">WARMUPS EXCLUDED</span></div>
+      <div class="chart-head"><p class="eyebrow">Volume per session</p>
+        <span class="note">${trend
+          ? esc(trend.ready ? `${trend.label} · WARMUPS OUT` : `${trend.label} · NEEDS ${trend.period}+`)
+          : 'WARMUPS EXCLUDED'}</span></div>
       <div class="chart-wrap" id="c-svol"></div>
     </div>
 
@@ -832,7 +861,8 @@ function renderExerciseProgress(root) {
 
   barChart($('#c-svol'),
     series.map((p) => ({ x: p.ts, label: label(p), value: Math.round(p.volume), sub: label(p) })),
-    { format: (v) => S.fmtVolume(v, unit()), height: 140, highlightLast: true,
+    { format: (v) => S.fmtVolume(v, unit()), height: 140,
+      overlay: trend && trend.ready ? { values: trend.values, label: trend.label } : null,
       tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty, sync });
 
   if (!bodyweight) {
@@ -852,6 +882,8 @@ async function viewData() {
     ? await navigator.storage.persisted().catch(() => false) : false;
   const last = state.settings.lastExportAt;
   const daysSinceExport = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const trendMode = S.maMode(state.settings.volumeTrend);
+  const trendPeriod = S.maPeriod(state.settings.volumeTrendPeriod);
 
   $('#view').innerHTML = `
     <p class="eyebrow">Data</p>
@@ -896,13 +928,29 @@ async function viewData() {
             ${Number(state.settings.restTimerSeconds) === v ? 'selected' : ''}>${v / 60 >= 1 ? `${v / 60} min` : `${v}s`}</option>`).join('')}
         </select>
       </div>
-      <div class="field" style="margin-bottom:0">
+      <div class="field">
         <label for="p-auto">Start rest timer automatically</label>
         <select class="input" id="p-auto" data-pref="restTimerAuto">
           <option value="yes" ${state.settings.restTimerAuto ? 'selected' : ''}>Yes, when I mark a set done</option>
           <option value="no" ${!state.settings.restTimerAuto ? 'selected' : ''}>No, never</option>
         </select>
       </div>
+      <div class="field" ${trendMode.id === 'off' ? 'style="margin-bottom:0"' : ''}>
+        <label for="p-trend">Volume trend line</label>
+        <select class="input" id="p-trend" data-pref="volumeTrend">
+          ${S.MA_MODES.map((m) => `<option value="${m.id}"
+            ${trendMode.id === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          Drawn over Volume per session in Progress → Per exercise.</p>
+      </div>
+      ${trendMode.id === 'off' ? '' : `<div class="field" style="margin-bottom:0">
+        <label for="p-trend-n">Averaged over</label>
+        <select class="input" id="p-trend-n" data-pref="volumeTrendPeriod">
+          ${S.MA_PERIODS.map((n) => `<option value="${n}"
+            ${trendPeriod === n ? 'selected' : ''}>${n} sessions</option>`).join('')}
+        </select>
+      </div>`}
     </div>
 
     <h3 class="h-sec">Routines</h3>
@@ -1615,10 +1663,13 @@ $('#view').addEventListener('change', async (e) => {
     else if (key === 'weightStep') v = Math.max(0.25, parseFloat(v.replace(',', '.')) || 2.5);
     else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
     else if (key === 'restTimerSeconds') v = parseInt(v, 10) || 120;
+    else if (key === 'volumeTrend') v = S.maMode(v).id;
+    else if (key === 'volumeTrendPeriod') v = S.maPeriod(v);
     state.settings[key] = v;
     db.saveSettings(state.settings);
     toast('Preference saved');
-    if (key === 'unit') render();
+    // Turning the trend off hides its length select, so this view has to redraw.
+    if (key === 'unit' || key === 'volumeTrend') render();
   }
 });
 
