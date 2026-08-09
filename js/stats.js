@@ -26,12 +26,18 @@ export function daysBetween(aIso, bIso) {
   return Math.round((b - a) / 86400000);
 }
 
+/* Dates read the same on every phone. The device locale would otherwise decide
+   the month names, so the same chart says "20. Juli" on one handset and
+   "20 Jul" on the next; the app is written in English, and its dates are too.
+   en-GB keeps the day-first order the rest of the UI assumes. */
+export const LOCALE = 'en-GB';
+
 export function fmtDate(iso, opts = { day: 'numeric', month: 'short' }) {
-  return parseLocalDate(iso).toLocaleDateString(undefined, opts);
+  return parseLocalDate(iso).toLocaleDateString(LOCALE, opts);
 }
 
 export function fmtDateLong(iso) {
-  return parseLocalDate(iso).toLocaleDateString(undefined, {
+  return parseLocalDate(iso).toLocaleDateString(LOCALE, {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 }
@@ -387,7 +393,7 @@ export function weeklyBuckets(sessions, exercisesById, weeks = 12) {
     buckets.push({
       start,
       key: localDate(start),
-      label: start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+      label: start.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }),
       sessions: 0,
       volume: 0,
       byGroup: {},

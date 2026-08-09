@@ -841,7 +841,7 @@ function viewSession(id) {
     </div>
     ${session.endedAt ? '' : `<button class="btn btn-primary btn-block" data-act="finish">Finish session</button>`}
     <button class="btn btn-danger btn-block btn-sm" style="margin-top:10px" data-act="delete-session">Delete this session</button>
-    <p class="meta">${esc(new Date(session.startedAt).toLocaleString())}</p>`;
+    <p class="meta">${esc(new Date(session.startedAt).toLocaleString(S.LOCALE))}</p>`;
 }
 
 /* ==========================================================================
@@ -865,7 +865,7 @@ function viewHistory() {
   const blocks = [...groups.entries()].map(([month, list]) => {
     const vol = list.reduce((t, s) => t + S.sessionVolume(s), 0);
     const title = S.parseLocalDate(`${month}-01`)
-      .toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      .toLocaleDateString(S.LOCALE, { month: 'long', year: 'numeric' });
     return `<h3 class="h-sec">${esc(title)}
         <span style="float:right;font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:500">
           ${list.length} · ${esc(S.fmtVolume(vol, unit()))}</span></h3>
@@ -1131,8 +1131,10 @@ function renderExerciseProgress(root) {
       tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty, sync });
 
   if (!bodyweight) {
+    // No date in the reading — the x tick under the point carries it, and all
+    // four charts read out the same session at once.
     lineChart($('#c-top'),
-      series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${p.topWeightReps} reps · ${label(p)}`, xlab: label(p) })),
+      series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${p.topWeightReps} reps`, xlab: label(p) })),
       { format: (v) => `${S.fmtNum(v)} ${unit()}`, tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
   }
 }
@@ -2291,8 +2293,10 @@ const INFO = {
        'Σ weight × reps across completed sets. Warmups are excluded everywhere, including from personal records.'],
       ['The trend line over Volume per session',
        'A moving average — simple or exponential, over as many sessions as you choose in Settings → Plot settings. It reads NEEDS n+ until there are that many sessions.'],
+      ['↑ ↓ → in a volume reading',
+       'Where the trend line moved between the session before and this one: climbing, falling, or level.'],
       ['Tap a point or a bar',
-       'Reads out its value. The charts of one exercise share a selection, so tapping a session marks it in all of them.'],
+       'Reads out its value. The charts of one exercise share a selection, so tapping a session marks it in all of them — the chart you touched reads out brightest, the others faintly.'],
       ['1M / 3M / 6M / 1Y / All',
        'Cuts the window. Averages and records are computed over the whole history first, so the window moves the view, not the numbers.'],
       ['Going stale',

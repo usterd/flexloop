@@ -16,10 +16,23 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v13';
+self.APP_VERSION = 'flexloop-v14';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v14',
+    items: [
+      ['The chart you touched leads',
+       'One tap still reads out every progress chart, but only the tooltip under your thumb is at full strength — the other three step back.'],
+      ['Shorter readings',
+       '“Every set” and “Top set weight” drop the date from their tooltips. The x axis under the point already says which session it is.'],
+      ['Which way the trend is going',
+       'The volume trend line in a tooltip is now led by ↑, ↓ or → — where the average moved since the session before it.'],
+      ['English dates everywhere',
+       'Dates no longer follow the phone’s language: “20 Jul”, not “20. Juli”, on every handset.'],
+    ],
+  },
   {
     v: 'flexloop-v13',
     items: [
