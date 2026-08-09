@@ -8,10 +8,25 @@
    whole view (structural changes).
    ========================================================================= */
 
+// Side-effect import: version.js is shared with sw.js, which loads it through
+// importScripts and so cannot read exports. It sets self.APP_VERSION and
+// self.APP_CHANGELOG, read below.
+import './version.js';
 import * as db from './db.js';
 import * as S from './stats.js';
 import { lineChart, barChart, setChart } from './charts.js';
 import { parseStrongifyCsv, looksLikeStrongify } from './importers.js';
+
+/** The string the service worker caches under, printed in Settings. */
+const APP_VERSION = self.APP_VERSION || 'flexloop';
+const CHANGELOG = self.APP_CHANGELOG || [];
+
+/**
+ * Days without an export before Settings starts asking for one. iOS clears
+ * the storage of a site it considers unused after roughly a week, so the
+ * reminder has to arrive inside that week to be of any use.
+ */
+const EXPORT_NAG_DAYS = 6;
 
 /* ------------------------------------------------------------------ state */
 
@@ -942,10 +957,11 @@ function renderExerciseProgress(root) {
 /* ==========================================================================
    EDITABLE OPTION LISTS
 
-   Rest timer and Weight step are dropdowns whose contents you can change.
-   Both work the same way: the stored setting holds one chosen value plus the
-   list of values on offer, the last entry of the select is "Edit this list…",
-   and choosing it opens the editor instead of picking anything.
+   Rest timer, Weight step and Averaged over are dropdowns whose contents you
+   can change. All three work the same way: the stored setting holds one
+   chosen value plus the list of values on offer, the last entry of the select
+   is "Edit this list…", and choosing it opens the editor instead of picking
+   anything.
 
    Every list passes through sanitize() on the way in and out, so a hand-edited
    backup, a duplicate, or a value from the wrong unit cannot put a broken
@@ -996,6 +1012,21 @@ const OPTION_LISTS = {
     // Not fmtNum: it pads to the requested places, and 2.50 kg beside 1 kg
     // reads as a precision the plates do not have. clean() already rounded.
     format: (v) => `${v} ${unit()}`,
+  },
+  volumeTrendPeriod: {
+    key: 'volumeTrendPeriodOptions',
+    defaults: db.DEFAULT_TREND_PERIODS,
+    title: 'Trend line lengths',
+    body: 'How many sessions the moving average is taken over. Nothing is drawn until you have that many, so a long average on a short history draws nothing at all.',
+    addLabel: 'Add a length, in sessions',
+    placeholder: '6',
+    inputMode: 'numeric',
+    invalid: `Enter a whole number of sessions between ${S.MA_PERIOD_MIN} and ${S.MA_PERIOD_MAX}.`,
+    clean: (v) => {
+      const n = Math.round(Number(String(v).replace(',', '.')));
+      return isFinite(n) && n >= S.MA_PERIOD_MIN && n <= S.MA_PERIOD_MAX ? n : null;
+    },
+    format: (v) => `${v} sessions`,
   },
 };
 
@@ -1142,7 +1173,7 @@ async function viewSettings() {
     <h2 class="h-big">Preferences &amp; data</h2>
     <p class="sub">${state.sessions.length} sessions · ${state.exercises.length} exercises · stored on this device only.</p>
 
-    ${daysSinceExport === null || daysSinceExport >= 30 ? `<div class="hint" style="margin-top:16px">
+    ${daysSinceExport === null || daysSinceExport >= EXPORT_NAG_DAYS ? `<div class="hint" style="margin-top:16px">
       <div><b>Export a backup.</b> ${daysSinceExport === null
         ? 'You have never exported. iOS can clear a site\'s storage on its own — a file in your Files app is the only real safety net.'
         : `Last export was ${daysSinceExport} days ago.`}</div></div>` : `<p class="meta" style="text-align:left;padding:14px 0 0">
@@ -1197,8 +1228,8 @@ async function viewSettings() {
           <option value="no" ${!state.settings.restTimerAuto ? 'selected' : ''}>No, never</option>
         </select>
         <p class="meta" style="text-align:left;padding:6px 0 0">
-          Both dropdowns above end in “Edit this list…”, where you can add or
-          remove the values they offer.</p>
+          Weight step and Rest timer end in “Edit this list…”, where you can add
+          or remove the values they offer. So does Averaged over, below.</p>
       </div>
     </div>
 
@@ -1215,10 +1246,7 @@ async function viewSettings() {
       </div>
       ${trendMode.id === 'off' ? '' : `<div class="field" style="margin-bottom:0">
         <label for="p-trend-n">Averaged over</label>
-        <select class="input" id="p-trend-n" data-pref="volumeTrendPeriod">
-          ${S.MA_PERIODS.map((n) => `<option value="${n}"
-            ${trendPeriod === n ? 'selected' : ''}>${n} sessions</option>`).join('')}
-        </select>
+        ${optionSelectHtml('volumeTrendPeriod', 'p-trend-n')}
         <p class="meta" style="text-align:left;padding:6px 0 0">
           ${esc(trendMode.id === 'ema'
             ? `Each session weighted 2/(${trendPeriod}+1), seeded with the plain average of the first ${trendPeriod}.`
@@ -1245,7 +1273,9 @@ async function viewSettings() {
 
     <hr class="sep">
     <button class="btn btn-danger btn-block" data-act="erase">Erase all data</button>
-    <p class="meta">flexloop · schema v${db.SCHEMA_VERSION} · offline</p>`;
+    <p class="meta">
+      <button type="button" class="linkish" data-act="version">${esc(APP_VERSION)}</button>
+      · schema v${db.SCHEMA_VERSION} · offline</p>`;
 }
 
 function viewExercises() {
@@ -1882,6 +1912,10 @@ document.addEventListener('click', async (e) => {
       infoSheet();
       break;
 
+    case 'version':
+      versionSheet();
+      break;
+
     case 'theme':
       // An explicit tap leaves "match system" behind — you have just said which
       // one you want, and following the system would undo it at sunset.
@@ -1949,12 +1983,11 @@ $('#view').addEventListener('change', async (e) => {
     }
     let v = el.value;
     if (key === 'restTimerAuto') v = v === 'yes';
-    else if (key === 'weightStep' || key === 'restTimerSeconds') {
+    else if (OPTION_LISTS[key]) {
       const n = OPTION_LISTS[key].clean(v);
       v = n == null ? state.settings[key] : n;
     } else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
     else if (key === 'volumeTrend') v = S.maMode(v).id;
-    else if (key === 'volumeTrendPeriod') v = S.maPeriod(v);
     else if (key === 'theme') v = THEMES.some((t) => t.id === v) ? v : 'dark';
     state.settings[key] = v;
     db.saveSettings(state.settings);
@@ -2055,23 +2088,45 @@ const INFO = {
 
   settings: {
     title: 'Settings',
-    sub: 'Preferences, the two editable dropdowns, how the trend line is computed, and your backups.',
+    sub: 'Preferences, the three editable dropdowns, how the trend line is computed, and your backups.',
     items: [
       ['Editable dropdowns',
-       'Rest timer and Weight step end in “Edit this list…”. That opens an editor where you add a value of your own — 75 seconds, a 3.75 kg plate pair — or remove ones you never pick. Remove the value in use and the setting moves to the nearest one left; Reset to defaults puts the original list back.'],
+       'Rest timer, Weight step and Averaged over end in “Edit this list…”. That opens an editor where you add a value of your own — 75 seconds, a 3.75 kg plate pair, a 6-session average — or remove ones you never pick. Remove the value in use and the setting moves to the nearest one left; Reset to defaults puts the original list back.'],
       ['Weight step and rep step',
        'What one tap of − or + moves a set by while logging. The weight step follows the unit, so switching kg → lb relabels the list rather than converting it.'],
       ['Moving averages',
        'Simple averages the last n sessions equally. Exponential weights recent sessions more heavily, with k = 2/(n+1), and is seeded with the simple average of its first window — so both kinds start at the same session and the same number. Nothing is drawn until n sessions exist, and the average always runs over the full history before being cut to the window on screen.'],
       ['Export, regularly',
-       'This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after 30 days.'],
+       `This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after ${EXPORT_NAG_DAYS} days.`],
       ['Import',
        'Import backup replaces everything on the device, and asks first. Import Strongify CSV merges instead, deleting nothing.'],
       ['Theme',
        'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
+      ['The version at the foot',
+       'Tap it for the version history — what changed in each release. It is the same string the offline cache is named after, so it changes whenever the app does.'],
     ],
   },
 };
+
+/**
+ * What changed, per released version, newest first. Reached by tapping the
+ * version at the foot of Settings — the number is only worth printing if you
+ * can find out what it means.
+ */
+function versionSheet() {
+  openSheet(`
+    <h2>Version history</h2>
+    <p class="sub">You are on ${esc(APP_VERSION)}. The version names the offline cache,
+      so it changes whenever the app itself does.</p>
+    ${CHANGELOG.map((rel) => `
+      <h3 class="h-sec">${esc(rel.v)}${rel.v === APP_VERSION ? ' · current' : ''}</h3>
+      <div class="info-list">
+        ${rel.items.map(([t, d]) => `<div class="info-item">
+          <span class="t">${esc(t)}</span>
+          <span class="s">${esc(d)}</span></div>`).join('')}
+      </div>`).join('')}
+    <button class="btn btn-block" style="margin-top:16px" data-close>Close</button>`);
+}
 
 function infoSheet() {
   const info = INFO[currentTab()] || INFO.log;

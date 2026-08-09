@@ -997,6 +997,23 @@ select.input {
   padding: 18px 0 4px;
 }
 
+/* The version at the foot of Settings. A button, because it opens the version
+   history, but it has to read as part of the .meta line it sits in — hence the
+   inherited font and the dotted underline rather than a button chrome. */
+.linkish {
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--mist);
+  background: none;
+  border: 0;
+  padding: 7px 3px;   /* a real tap target, pulled back out by the margin */
+  margin: -7px 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.linkish:active { color: var(--signal); }
+
 .swipe-note { font-size: 11.5px; color: var(--dim); text-align: center; padding: 8px 0 0; }
 
 @media (prefers-reduced-motion: reduce) {

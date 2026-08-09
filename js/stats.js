@@ -278,8 +278,14 @@ export const MA_MODES = [
   { id: 'ema', label: 'Exponential moving average', short: 'EMA' },
 ];
 
-/** Sessions per average. Small numbers: a gym history is short. */
-export const MA_PERIODS = [3, 5, 8, 10, 12];
+/**
+ * Sessions per average. The lengths on offer are an editable list, held in
+ * settings (db.DEFAULT_TREND_PERIODS seeds it), so all that is fixed here is
+ * the range a length may fall in: two sessions is the shortest thing that
+ * averages anything, and past sixty the line is flat for any real history.
+ */
+export const MA_PERIOD_MIN = 2;
+export const MA_PERIOD_MAX = 60;
 
 export const MA_DEFAULT_PERIOD = 5;
 
@@ -287,11 +293,11 @@ export function maMode(id) {
   return MA_MODES.find((m) => m.id === id) || MA_MODES[0];
 }
 
-/** Clamp whatever came out of storage onto the offered list. */
+/** Clamp whatever came out of storage into the allowed range. */
 export function maPeriod(n) {
   const v = parseInt(n, 10);
   if (!isFinite(v)) return MA_DEFAULT_PERIOD;
-  return Math.min(Math.max(v, MA_PERIODS[0]), MA_PERIODS[MA_PERIODS.length - 1]);
+  return Math.min(Math.max(v, MA_PERIOD_MIN), MA_PERIOD_MAX);
 }
 
 /**
