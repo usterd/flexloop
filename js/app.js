@@ -227,6 +227,7 @@ async function reload() {
   state.byId = new Map(exercises.map((e) => [e.id, e]));
   state.sessions = sessions;
   state.routines = sortRoutines(routines);
+  historyCache.clear();
   // A session left open overnight is finished, not in progress. Close anything
   // older than 18h so the Log screen never reopens last week's workout.
   const open = sessions.find((s) => !s.endedAt);
@@ -283,6 +284,7 @@ async function render() {
   const hash = location.hash;
   const hit = routes.find(([re]) => re.test(hash));
   const view = $('#view');
+  historyCache.clear();
   view.scrollTop = 0;
   $('#topbar-action').innerHTML = '';
   if (hit) {
@@ -430,6 +432,143 @@ function ghostHtml(session, entry) {
   return `<div class="ghost">Last <b>${esc(w)}</b> · ${esc(S.relativeDays(last.date))}</div>`;
 }
 
+/* ---------------------------------------------------------- the boost */
+
+/** What each target means, in the Settings note under the dropdown. */
+const BOOST_NOTES = {
+  off: 'No target line. The Log shows only what you lifted last time.',
+  e1rm: 'Epley, weight × (1 + reps / 30), on your best set. Both more weight and more reps beat it, so the line offers each.',
+  weight: 'The heaviest single set you have done, whatever the reps. Beaten by one more notch of the weight step.',
+  reps: 'The most reps you have managed at the weight you are working at today, or heavier.',
+  volume: 'Σ weight × reps over the whole exercise in one session. Beaten by an extra set as readily as a heavier one.',
+};
+
+/**
+ * Per-exercise history with one session left out, memoised for the length of
+ * one render. The boost line wants it once per exercise card, and each rebuild
+ * walks every session ever logged.
+ *
+ * Nothing cached here depends on the excluded session — which is always the
+ * session being edited — so ticking a set cannot stale it. render() and
+ * reload() clear it anyway, which is the only invalidation that matters.
+ */
+const historyCache = new Map();
+
+function exHistory(exerciseId, excludeSessionId) {
+  const key = `${exerciseId} ${excludeSessionId || ''}`;
+  let hit = historyCache.get(key);
+  if (!hit) {
+    const list = excludeSessionId
+      ? state.sessions.filter((s) => s.id !== excludeSessionId)
+      : state.sessions;
+    hit = S.exerciseSeries(list, exerciseId);
+    historyCache.set(key, hit);
+  }
+  return hit;
+}
+
+/**
+ * The target for one exercise card: what to beat, and what it would take.
+ *
+ * A lift that has never carried a load is forced onto reps whatever the
+ * setting says — its e1RM, top weight and volume are all zero, and a target of
+ * zero is no target at all.
+ */
+function boostState(session, entry) {
+  if (S.boostMetric(state.settings.boostMetric).id === 'off') return null;
+  const series = exHistory(entry.exerciseId, session.id);
+  if (!series.length) return null;
+  const v = nextSetValues(session, entry);
+  const metricId = S.seriesIsBodyweight(series) ? 'reps' : state.settings.boostMetric;
+  const b = S.boostTarget(series, S.countedSets(entry), {
+    metricId, weight: v.weight, reps: v.reps, step: state.settings.weightStep,
+  });
+  if (b) b.streak = S.improvementStreak(series, metricId, v.weight);
+  return b;
+}
+
+/** A number in its metric's own terms: 96.0 kg, 9 reps, 1.2k kg. */
+function boostValue(b, n) {
+  const m = b.metric.id;
+  if (m === 'volume') return S.fmtVolume(n, unit());
+  if (m === 'reps') return `${S.fmtNum(n, 0)} reps`;
+  return `${S.fmtNum(n, m === 'e1rm' ? 1 : 0)} ${unit()}`;
+}
+
+/**
+ * The prescription as a headline figure plus its unit, for the Progress tile.
+ * Deliberately not the record itself — that number is already on the same
+ * screen, in the Personal records grid directly below.
+ */
+function boostHeadline(b) {
+  const m = b.metric.id;
+  if (m === 'e1rm') {
+    if (b.reps != null) return { v: `${S.fmtNum(b.atWeight)}×${b.reps}`, small: '' };
+    if (b.weight != null) return { v: `${S.fmtNum(b.weight)}×${b.atReps}`, small: '' };
+    return null;
+  }
+  if (m === 'weight') return b.weight != null ? { v: S.fmtNum(b.weight), small: unit() } : null;
+  if (m === 'reps') return b.reps != null ? { v: String(b.reps), small: 'reps' } : null;
+  return b.sets != null
+    ? { v: String(b.sets), small: `${b.sets === 1 ? 'set' : 'sets'} of ${b.atReps}` } : null;
+}
+
+/** What a cleared target actually beat — the all-time best outranks last time. */
+const beatenWhat = (b) => (b.current > b.best ? 'past your best' : 'past last time');
+
+/** The concrete ways to clear a target, as one phrase. */
+function boostWays(b) {
+  const m = b.metric.id;
+  if (m === 'e1rm') {
+    const ways = [];
+    if (b.reps != null) ways.push(`${S.fmtNum(b.atWeight)}×${b.reps}`);
+    // Only worth offering when it is actually a heavier bar than today's.
+    if (b.weight != null && b.weight > b.atWeight) ways.push(`${S.fmtNum(b.weight)}×${b.atReps}`);
+    return ways.join(' or ');
+  }
+  if (m === 'weight') return b.weight != null ? `try ${S.fmtNum(b.weight)}` : '';
+  if (m === 'reps') return b.reps != null ? `try ${b.reps}` : '';
+  return b.sets != null ? `${b.sets} more set${b.sets === 1 ? '' : 's'} of ${b.atReps}` : '';
+}
+
+/** The target as one line under the ghost. Empty but present, so it can be patched. */
+function boostHtml(session, entry) {
+  const b = boostState(session, entry);
+  if (!b) return `<div class="boost" data-boost hidden></div>`;
+  const tag = b.metric.id === 'e1rm' ? ' e1RM' : '';
+  let text;
+
+  if (b.achieved) {
+    text = `<b>${esc(boostValue(b, b.current))}</b>${tag} · ${beatenWhat(b)}`;
+  } else {
+    const at = b.metric.id === 'reps' && b.atWeight > 0
+      ? ` at ${esc(`${S.fmtNum(b.atWeight)} ${unit()}`)}` : '';
+    const ways = boostWays(b);
+    text = `Beat <b>${esc(boostValue(b, b.target))}</b>${tag}${at}${ways ? ` · ${esc(ways)}` : ''}`;
+  }
+
+  // One improvement spans two sessions, hence the +1.
+  const streak = b.streak >= 1 ? `<i>${b.streak + 1} sessions climbing</i>` : '';
+  return `<div class="boost${b.achieved ? ' is-hit' : ''}" data-boost>${text}${streak}</div>`;
+}
+
+function patchBoost(session, entry, entryEl) {
+  const el = entryEl && $('[data-boost]', entryEl);
+  if (el && entry) el.outerHTML = boostHtml(session, entry);
+}
+
+/**
+ * A set has just carried the exercise past its own target. The marker on the
+ * row is deliberately not persisted: it belongs to this moment, and the boost
+ * line above it carries the durable version of the same news.
+ */
+function celebrate(b, setEl) {
+  if (setEl) setEl.classList.add('is-pr');
+  if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+  toast(`${b.current > b.best ? 'New best' : 'Past last time'} — ${
+    boostValue(b, b.current)} ${b.metric.short}`.trim());
+}
+
 function setRowHtml(entry, set, si) {
   const ex = state.byId.get(entry.exerciseId) || {};
   const bw = ex.isBodyweight;
@@ -483,6 +622,7 @@ function entryHtml(session, entry, ei) {
       <div style="min-width:0">
         ${entryTitleHtml(entry)}
         ${ghostHtml(session, entry)}
+        ${boostHtml(session, entry)}
       </div>
       <button class="btn btn-sm btn-quiet" data-act="entry-menu" aria-label="Exercise options">•••</button>
     </div>
@@ -847,6 +987,29 @@ function volumeTrend(full, series) {
   };
 }
 
+/**
+ * The Progress tab's version of the target. Nothing is in progress here, so it
+ * aims at the all-time best rather than at last session, and it also reports
+ * how long the number has stood and whether the exercise is climbing.
+ */
+function progressBoost(full, bodyweight) {
+  if (S.boostMetric(state.settings.boostMetric).id === 'off' || !full.length) return null;
+  const metricId = bodyweight ? 'reps' : state.settings.boostMetric;
+  const recent = full[full.length - 1];
+  const at = recent.topWeight;
+  const b = S.boostTarget(full, [], {
+    metricId, weight: at, reps: recent.topWeightReps || 1,
+    step: state.settings.weightStep, basis: 'best',
+  });
+  if (!b) return null;
+  b.streak = S.improvementStreak(full, metricId, at);
+  // The session that set the number now being chased.
+  const peak = full.reduce((m, p) => (S.metricOfSets(p.sets, metricId, at)
+    > S.metricOfSets(m.sets, metricId, at) ? p : m), full[0]);
+  b.stood = S.daysBetween(peak.date, S.localDate());
+  return b;
+}
+
 function renderExerciseProgress(root) {
   if (!state.exercises.length) {
     root.innerHTML = `<div class="empty"><div class="glyph"></div><h3>No exercises yet</h3>
@@ -865,6 +1028,8 @@ function renderExerciseProgress(root) {
   const bodyweight = S.seriesIsBodyweight(full);
   const pr = S.personalRecords(full);
   const trend = volumeTrend(full, series);
+  const boost = progressBoost(full, bodyweight);
+  const boostHead = boost ? boostHeadline(boost) : null;
 
   root.innerHTML = `
     <button class="btn btn-block" data-act="choose-progress-ex" style="justify-content:space-between">
@@ -901,6 +1066,18 @@ function renderExerciseProgress(root) {
     ${bodyweight ? '' : `<div class="card chart-card">
       <div class="chart-head"><p class="eyebrow">Top set weight</p><span class="note">${esc(unit().toUpperCase())}</span></div>
       <div class="chart-wrap" id="c-top"></div>
+    </div>`}
+
+    ${!boostHead ? '' : `<h3 class="h-sec">Next target</h3>
+    <div class="stat accent next" style="margin-bottom:10px">
+      <span class="k">Next target · ${esc(boost.metric.short)}</span>
+      <span class="v">${esc(boostHead.v)}${boostHead.small
+        ? `<small>${esc(boostHead.small)}</small>` : ''}</span>
+      <span class="m">${esc([
+        `beats ${boostValue(boost, boost.target)}`,
+        `stood ${boost.stood} day${boost.stood === 1 ? '' : 's'}`,
+        boost.streak >= 1 ? `${boost.streak + 1} sessions climbing` : '',
+      ].filter(Boolean).join(' · '))}</span>
     </div>`}
 
     <h3 class="h-sec">Personal records</h3>
@@ -1173,6 +1350,7 @@ async function viewSettings() {
   const daysSinceExport = last ? Math.floor((Date.now() - last) / 86400000) : null;
   const trendMode = S.maMode(state.settings.volumeTrend);
   const trendPeriod = S.maPeriod(state.settings.volumeTrendPeriod);
+  const boost = S.boostMetric(state.settings.boostMetric);
 
   $('#view').innerHTML = `
     <p class="eyebrow">Settings</p>
@@ -1236,6 +1414,18 @@ async function viewSettings() {
         <p class="meta" style="text-align:left;padding:6px 0 0">
           Weight step and Rest timer end in “Edit this list…”, where you can add
           or remove the values they offer. So does Averaged over, below.</p>
+      </div>
+    </div>
+
+    <h3 class="h-sec">Motivation</h3>
+    <div class="card card-pad">
+      <div class="field" style="margin-bottom:0">
+        <label for="p-boost">Target to beat</label>
+        <select class="input" id="p-boost" data-pref="boostMetric">
+          ${S.BOOST_METRICS.map((m) => `<option value="${m.id}"
+            ${boost.id === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">${esc(BOOST_NOTES[boost.id])}</p>
       </div>
     </div>
 
@@ -1714,16 +1904,24 @@ document.addEventListener('click', async (e) => {
       if (input) input.value = f === 'weight' ? S.fmtNum(next) : String(next);
       await persist(c.session);
       patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
       break;
     }
 
     case 'done': {
       if (!c.set) return;
+      // The target as it stood before this set counted, so that clearing it is
+      // an event rather than a state — untick and retick, and it fires again.
+      const before = boostState(c.session, c.entry);
       c.set.done = !c.set.done;
       btn.setAttribute('aria-pressed', c.set.done ? 'true' : 'false');
       c.setEl.classList.toggle('is-done', c.set.done);
+      if (!c.set.done) c.setEl.classList.remove('is-pr');
       await persist(c.session);
       patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
+      const after = c.set.done ? boostState(c.session, c.entry) : null;
+      if (after && after.achieved && before && !before.achieved) celebrate(after, c.setEl);
       if (c.set.done && state.settings.restTimerAuto && !c.set.isWarmup) {
         startRest(state.settings.restTimerSeconds);
       }
@@ -1957,7 +2155,11 @@ $('#view').addEventListener('input', (e) => {
     const n = el.dataset.f === 'reps' ? parseInt(raw, 10) : parseFloat(raw);
     c.set[el.dataset.f] = isFinite(n) && n >= 0 ? n : 0;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { persist(c.session); patchSummary(c.session); }, 350);
+    saveTimer = setTimeout(() => {
+      persist(c.session);
+      patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
+    }, 350);
   } else if (el.dataset.act === 'notes') {
     const c = ctx(el);
     if (!c.session) return;
@@ -1976,6 +2178,7 @@ $('#view').addEventListener('change', async (e) => {
     el.value = el.dataset.f === 'weight' ? S.fmtNum(c.set.weight) : String(c.set.reps);
     await persist(c.session);
     patchSummary(c.session);
+    patchBoost(c.session, c.entry, c.entryEl);
   } else if (el.dataset.pref) {
     const key = el.dataset.pref;
     // "Edit this list…" is a door, not a value: put the select back where it
@@ -1994,15 +2197,18 @@ $('#view').addEventListener('change', async (e) => {
       v = n == null ? state.settings[key] : n;
     } else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
     else if (key === 'volumeTrend') v = S.maMode(v).id;
+    else if (key === 'boostMetric') v = S.boostMetric(v).id;
     else if (key === 'theme') v = THEMES.some((t) => t.id === v) ? v : 'dark';
     state.settings[key] = v;
     db.saveSettings(state.settings);
     if (key === 'theme') applyTheme();
     toast('Preference saved');
     // Some of these change what the rest of the screen says: the unit relabels
-    // the weight steps, turning the trend off hides its length select, and the
-    // theme decides which glyph the note beside it names.
-    if (key === 'unit' || key === 'theme' || key === 'volumeTrend' || key === 'volumeTrendPeriod') render();
+    // the weight steps, turning the trend off hides its length select, the
+    // theme decides which glyph the note beside it names, and each target
+    // metric explains itself differently.
+    if (key === 'unit' || key === 'theme' || key === 'volumeTrend'
+      || key === 'volumeTrendPeriod' || key === 'boostMetric') render();
   }
 });
 
@@ -2055,6 +2261,8 @@ const INFO = {
        'Jumps to its chart on Progress → Per exercise.'],
       ['The dim line under each name',
        'The ghost: what you lifted last time, so you never have to go looking for it. New sets prefill from it too.'],
+      ['The line under the ghost',
+       'The target: what it would take to beat your own number today, in whichever metric you picked in Settings → Motivation. It aims at last session while you are under it, then at your all-time best. Tick the set that clears it and it says so.'],
     ],
   },
 
@@ -2089,12 +2297,14 @@ const INFO = {
        'Cuts the window. Averages and records are computed over the whole history first, so the window moves the view, not the numbers.'],
       ['Going stale',
        'Longest since you last trained it. Past three weeks it turns red.'],
+      ['Next target',
+       'What it would take to beat your all-time best in the metric picked in Settings → Motivation, how long that best has stood, and whether the last few sessions are climbing.'],
     ],
   },
 
   settings: {
     title: 'Settings',
-    sub: 'Preferences, the three editable dropdowns, how the trend line is computed, and your backups.',
+    sub: 'Preferences, the three editable dropdowns, what the Log aims at, how the trend line is computed, and your backups.',
     items: [
       ['Editable dropdowns',
        'Rest timer, Weight step and Averaged over end in “Edit this list…”. That opens an editor where you add a value of your own — 75 seconds, a 3.75 kg plate pair, a 6-session average — or remove ones you never pick. Remove the value in use and the setting moves to the nearest one left; Reset to defaults puts the original list back.'],
@@ -2106,6 +2316,8 @@ const INFO = {
        `This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after ${EXPORT_NAG_DAYS} days.`],
       ['Import',
        'Import backup replaces everything on the device, and asks first. Import Strongify CSV merges instead, deleting nothing.'],
+      ['Target to beat',
+       'Which metric the Log’s target line, the Next target tile and the finish-session read-out all measure. Estimated 1RM responds to weight and reps both; Heaviest set and Reps are blunter; Volume is the easiest to beat, since another set does it. None turns all three off. A lift that has never carried a load is always measured in reps.'],
       ['Theme',
        'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
       ['The version at the foot',
@@ -2214,13 +2426,83 @@ async function finishSession(session) {
     });
     if (!ok) return;
   }
+  // Judged before the session is closed and the view re-rendered, because both
+  // clear the history cache the verdicts are read from.
+  const verdicts = sessionVerdicts(session);
   session.endedAt = Date.now();
   await persist(session);
   state.activeId = null;
   stopRest();
   location.hash = '#/log';
   render();
-  toast(`Session saved — ${summaryLine(session)}`);
+  if (verdicts.length) debriefSheet(session, verdicts);
+  else toast(`Session saved — ${summaryLine(session)}`);
+}
+
+/* ------------------------------------------------------ session debrief */
+
+const VERDICTS = {
+  pr: { rank: 0, label: 'best ever', cls: 'v-pr' },
+  up: { rank: 1, label: 'up on last time', cls: 'v-up' },
+  level: { rank: 2, label: 'level with last time', cls: 'v-level' },
+  down: { rank: 3, label: 'down on last time', cls: 'v-down' },
+  first: { rank: 4, label: 'first time logged', cls: 'v-first' },
+};
+
+/**
+ * How each exercise in a finished session compares with its own past, best
+ * result first. Exercises with nothing completed are left out — a session is
+ * judged on what was ticked.
+ */
+function sessionVerdicts(session) {
+  if (!session) return [];
+  const metric = S.boostMetric(state.settings.boostMetric);
+  if (metric.id === 'off') return [];
+  const out = [];
+  for (const entry of session.entries || []) {
+    const sets = S.countedSets(entry);
+    if (!sets.length) continue;
+    const series = exHistory(entry.exerciseId, session.id);
+    const at = S.topWeightSet(sets);
+    const load = at ? Number(at.weight) || 0 : 0;
+    // No load in the history, or none carried today — which is also the case
+    // for an exercise being logged for the first time — leaves reps as the only
+    // metric with anything to say. The Log's target line applies the same rule.
+    const metricId = load <= 0 || S.seriesIsBodyweight(series) ? 'reps' : metric.id;
+    const v = S.sessionVerdict(series, sets, metricId, load);
+    if (!v.value) continue;
+    out.push({ ...v, name: exName(entry.exerciseId), metric: S.boostMetric(metricId) });
+  }
+  return out.sort((a, b) => VERDICTS[a.verdict].rank - VERDICTS[b.verdict].rank);
+}
+
+/**
+ * The finish-session read-out. It replaces the old one-line toast: the same
+ * summary is at the top, with what each exercise did under it.
+ */
+function debriefSheet(session, verdicts) {
+  const rows = verdicts.map((v) => {
+    const info = VERDICTS[v.verdict];
+    const shown = boostValue({ metric: v.metric }, v.value);
+    const delta = v.verdict === 'up' || v.verdict === 'pr'
+      ? ` +${boostValue({ metric: v.metric }, Math.abs(v.delta))}`
+      : v.verdict === 'down' ? ` −${boostValue({ metric: v.metric }, Math.abs(v.delta))}` : '';
+    return `<div class="verdict ${info.cls}">
+      <span class="grow"><span class="t">${esc(v.name)}</span>
+        <span class="s">${esc(info.label)}${esc(delta)}</span></span>
+      <span class="r">${esc(shown)}</span>
+    </div>`;
+  }).join('');
+
+  const prs = verdicts.filter((v) => v.verdict === 'pr').length;
+  openSheet(`
+    <h2>Session saved</h2>
+    <p class="sub">${esc(summaryLine(session))}${prs
+      ? ` · ${prs} best ever` : ''}</p>
+    <div class="verdicts">${rows}</div>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn btn-primary" data-close>Done</button>
+    </div>`);
 }
 
 /* ---------------------------------------------------- add-to-home hint */

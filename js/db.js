@@ -140,6 +140,9 @@ const DEFAULT_SETTINGS = {
   volumeTrend: 'sma',
   volumeTrendPeriod: 5,
   volumeTrendPeriodOptions: DEFAULT_TREND_PERIODS,
+  // The metric the Log's "beat it" line targets: 'off' | 'e1rm' | 'weight' |
+  // 'reps' | 'volume'. See stats.boostTarget.
+  boostMetric: 'e1rm',
 };
 
 /**

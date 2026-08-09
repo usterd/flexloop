@@ -352,6 +352,41 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .ghost b { color: var(--mist); font-weight: 600; }
 
+/* The target, directly under the ghost and built the same way, so the two read
+   as one block: what you did, then what would beat it. */
+.boost {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+  letter-spacing: -0.01em;
+  margin-top: 3px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+.boost[hidden] { display: none; }
+.boost::before {
+  content: "";
+  width: 12px; height: 1px;
+  background: var(--edge-hi);
+  flex: none;
+  align-self: center;
+}
+.boost b { color: var(--mist); font-weight: 600; }
+.boost i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--signal);
+  opacity: 0.85;
+  width: 100%;
+  padding-left: 18px;
+}
+/* Cleared. The whole line goes to the accent, since it is now a result. */
+.boost.is-hit { color: var(--signal); }
+.boost.is-hit b { color: var(--signal); }
+.boost.is-hit::before { background: var(--signal); }
+
 /* ------------------------------------------------------------- set rows */
 
 /* Column labels for the set grid below. Same columns as .set so "KG" and
@@ -386,6 +421,16 @@ body.has-rest .view { padding-bottom: 96px; }
 .set:last-child { border-bottom: 0; }
 .set.is-warmup { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--stripe) 6px 12px); }
 .set.is-done .num { color: var(--signal); }
+/* The set that just carried the exercise past its target. Not persisted — it
+   lasts as long as the card does, and the boost line holds the durable news. */
+.set.is-pr { background: var(--signal-d); }
+.set.is-pr .num::after {
+  content: "★";
+  display: block;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--signal);
+}
 
 .num {
   font-family: var(--mono);
@@ -593,6 +638,9 @@ body.has-rest .view { padding-bottom: 96px; }
 .stat .v small { font-size: 13px; font-weight: 600; color: var(--mist); letter-spacing: 0; margin-left: 2px; }
 .stat .m { font-size: 12px; color: var(--dim); margin-top: 5px; display: block; }
 .stat.accent .v { color: var(--signal); }
+/* The Next target tile's unit is a word — "reps", "sets of 5" — not the "kg"
+   the 2px above was sized for, and at that gap it reads as one word. */
+.stat.next .v small { margin-left: 6px; }
 
 /* ------------------------------------------------------------------ list */
 
@@ -985,6 +1033,44 @@ select.input {
 }
 .pr .k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim); text-transform: uppercase; }
 .pr .v { font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin-top: 3px; }
+
+/* ------------------------------------------------- finish-session debrief */
+
+/* Built like .rows, but these are read-only: nothing here is tappable. */
+.verdicts {
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--slab);
+  margin-top: 14px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--edge);
+  border-left: 2px solid transparent;
+}
+.verdict:last-child { border-bottom: 0; }
+.verdict .grow { flex: 1; min-width: 0; }
+.verdict .t { font-weight: 600; letter-spacing: -0.01em; display: block; }
+.verdict .s { font-size: 12.5px; color: var(--dim); display: block; margin-top: 2px; }
+.verdict .r {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--mist);
+  flex: none;
+}
+.verdict.v-pr { border-left-color: var(--signal); }
+.verdict.v-pr .s, .verdict.v-pr .r { color: var(--signal); }
+.verdict.v-up { border-left-color: var(--edge-hi); }
+.verdict.v-down .s { color: var(--danger); }
 
 .sep { height: 1px; background: var(--edge); margin: 22px 0; border: 0; }
 
