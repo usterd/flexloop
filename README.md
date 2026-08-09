@@ -44,14 +44,26 @@ editing for your repo name.
 ## Ship an update
 
 1. Edit whatever you want to change.
-2. Open `sw.js` and bump the version at the top:
+2. Open `js/version.js` and bump the version at the top, then add what changed to
+   the top of `APP_CHANGELOG`:
 
    ```js
-   const CACHE_VERSION = 'flexloop-v4';   // was v3
+   self.APP_VERSION = 'flexloop-v12';   // was v11
+
+   self.APP_CHANGELOG = [
+     { v: 'flexloop-v12', items: [['What moved', 'Thirty words at most.']] },
+     // …then every earlier release, unchanged
+   ];
    ```
 
    **This is the only step people forget.** Without a bump the old cache keeps
    serving the old files and your change never appears.
+
+   One file, because two would drift: `sw.js` names its cache after
+   `APP_VERSION` (via `importScripts`, which is why that file has no `export`
+   in it) and Settings prints the same string at its foot, where tapping it
+   opens the changelog. A version the app shows that disagrees with the one it
+   caches under is worse than showing none.
 
 3. Commit and push. Pages redeploys in about a minute.
 4. On the phone, open the app while online. A "Update ready — Reload" banner
@@ -137,19 +149,25 @@ Screen icon left on that tab keeps working.)
 
 ### Editable dropdowns
 
-**Rest timer** and **Weight step** are dropdowns whose contents you choose. Both
-end in **Edit this list…**, which opens an editor where you can
+**Rest timer**, **Weight step** and **Averaged over** are dropdowns whose contents
+you choose. All three end in **Edit this list…**, which opens an editor where you
+can
 
-- add a value of your own — 75 seconds, a 3.75 kg plate pair,
+- add a value of your own — 75 seconds, a 3.75 kg plate pair, a 6-session average,
 - remove ones you never pick, down to a last one that cannot be removed,
 - or reset the list to the defaults.
 
 The list and the chosen value are stored separately (`restTimerOptions` /
-`restTimerSeconds`, `weightStepOptions` / `weightStep`) and both ride along in a
-backup. Values are cleaned on the way in and out — deduplicated, sorted, clamped
-to 5–3600 seconds and 0.25–100 units — so a hand-edited backup cannot put a
-broken choice in the dropdown. Remove the value currently in use and the setting
-moves to the **nearest remaining one**, never silently back to a default.
+`restTimerSeconds`, `weightStepOptions` / `weightStep`, `volumeTrendPeriodOptions`
+/ `volumeTrendPeriod`) and all of them ride along in a backup. Values are cleaned
+on the way in and out — deduplicated, sorted, clamped to 5–3600 seconds, 0.25–100
+units and 2–60 sessions — so a hand-edited backup cannot put a broken choice in
+the dropdown. Remove the value currently in use and the setting moves to the
+**nearest remaining one**, never silently back to a default.
+
+Adding one is a matter of a spec in `OPTION_LISTS` (a `clean`, a `format`, and
+the two settings keys); everything else — the select, the editor sheet, the
+sanitising, the change handler — is shared.
 
 Weight step labels follow the unit setting; switching kg → lb relabels the list
 rather than converting it, since the number you want is a property of your plates,
@@ -159,7 +177,18 @@ not of the previous unit.
 
 The moving-average controls have their own header, apart from the logging
 preferences: they change what a chart draws, not what a button does. The note
-under **Averaged over** spells out the arithmetic for whichever kind is selected.
+under **Averaged over** spells out the arithmetic for whichever kind is selected,
+and the lengths it offers are an editable list like the two above it — anything
+from 2 to 60 sessions, though a length longer than your history draws nothing at
+all, by design.
+
+## Version history
+
+The foot of Settings reads `flexloop · v11 · offline`. That `v11` is the build,
+and the offline cache is named after it (`flexloop-v11`); tapping it opens the
+changelog — what changed in each release, newest first, a line or two per thing.
+The changelog lives in `js/version.js` beside the version itself, so bumping one
+without the other is hard to miss.
 
 ## The info button
 
@@ -168,6 +197,11 @@ long-press gestures, what History groups and how to delete a session, how
 Progress computes e1RM and volume, and on Settings the editable dropdowns, the
 two moving averages, and why exporting regularly is not optional. One entry per
 tab, in `INFO` at the bottom of `app.js`.
+
+Settings also nags for a backup once **six days** have passed since your last
+export (`EXPORT_NAG_DAYS` in `app.js`). iOS can clear a site's storage after
+roughly a week of not opening it, so a reminder that arrives later than that is
+a reminder about data you no longer have.
 
 ## Light and dark
 
@@ -198,8 +232,9 @@ carries whatever has to sit on top of an accent fill.
 ```
 index.html              app shell, PWA meta tags
 manifest.webmanifest    relative start_url and scope, icons
-sw.js                   precache list + CACHE_VERSION
+sw.js                   precache list, cache named after APP_VERSION
 css/app.css             the whole visual system
+js/version.js           the version string + changelog, shared by sw.js and app.js
 js/app.js               routing, views, all interaction
 js/db.js                IndexedDB wrapper (exercises, sessions, routines),
                         export/import, settings
