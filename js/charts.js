@@ -192,35 +192,53 @@ function broadcast(key, x, from) {
  *                                bars in the per-set chart.
  *   paint(Set<Number>)         — highlight exactly these item indices
  *   describe(i) -> { text, left, top }  — tooltip content and anchor
+ *   pick(Number[]) -> Number   — optional: which of several items sharing the
+ *                                selected x the tooltip should describe.
+ *                                Defaults to the first of them.
  *   sync: String|null          — group key, or null for a standalone chart
  * }
  */
 function bindSelection(wrap, cfg) {
-  const { svg, W, top, height, pos, xs, paint, describe, sync } = cfg;
+  const { svg, W, top, height, pos, xs, paint, describe, pick, sync } = cfg;
   const tip = makeTip(wrap);
 
   const clear = () => { paint(NONE); tip.hidden = true; };
+
+  // The card clips whatever leaves it, so the anchor is corrected against the
+  // tooltip's own measured box: the text is in before it is sized, since a
+  // reading is only as wide as its longest line and a second line makes it
+  // taller. Both offsets are what `.tip`'s transform subtracts — half its
+  // width to the left, 120% of its height upward.
+  const showTip = (i) => {
+    const d = describe(i);
+    tip.textContent = d.text;
+    tip.hidden = false;
+    const half = tip.offsetWidth / 2;
+    const lo = half + 2, hi = W - half - 2;
+    tip.style.left = `${hi < lo ? W / 2 : Math.min(Math.max(d.left, lo), hi)}px`;
+    tip.style.top = `${Math.max(d.top, tip.offsetHeight * 1.2 + 2)}px`;
+  };
 
   // Chosen here: highlight, show the tooltip, and tell the rest of the group.
   const select = (i) => {
     if (i == null) { clear(); broadcast(sync, null, entry); return; }
     paint(new Set([i]));
-    const d = describe(i);
-    tip.textContent = d.text;
-    tip.hidden = false;
-    tip.style.left = `${d.left}px`;
-    tip.style.top = `${d.top}px`;
+    showTip(i);
     broadcast(sync, xs[i], entry);
   };
 
-  // Chosen in a sibling chart: mark the same session, but only the chart under
-  // the thumb carries a tooltip.
+  // Chosen in a sibling chart: mark the same session and read it out here too.
+  // The charts stacked in a view are one figure, so a single touch answers
+  // "what happened in this session" down the whole column rather than in the
+  // one chart the thumb happens to be on.
   const follow = (x) => {
-    tip.hidden = true;
-    if (x == null) return paint(NONE);
+    if (x == null) return clear();
     const sel = new Set();
     xs.forEach((v, j) => { if (v === x) sel.add(j); });
     paint(sel);
+    if (!sel.size) { tip.hidden = true; return; }
+    const idx = [...sel];
+    showTip(pick ? pick(idx) : idx[0]);
   };
 
   const entry = { wrap, follow };
@@ -341,7 +359,11 @@ export function lineChart(wrap, points, opts = {}) {
  * bars: [{ x: Number (ms timestamp or index, optional), label, value, sub }]
  *       Pass `x` whenever the bars share a timeline with a line chart above or
  *       below them; without it the bars fall back to evenly spaced indices.
- * opts: { height, format(v), sync, overlay }
+ * opts: { height, format(v), sync, overlay, valueLabel }
+ *
+ * `valueLabel` names the bar's value in the tooltip — "Total · 480 kg" instead
+ * of "480 kg · 27 Apr". Use it where a trend line gives the reading a second,
+ * labelled line to line up with; without it the bar reads out with its date.
  *
  * `overlay` draws a second series over the bars — a moving average, say:
  *   { values: (Number|null)[], label: String, format(v) -> String }
@@ -446,8 +468,11 @@ export function barChart(wrap, bars, opts = {}) {
         const t = ovAt(i);
         const trend = t == null ? '' :
           `\n${ov.label ? `${ov.label}  ·  ` : ''}${(ov.format || fmt)(t)}`;
+        const head = opts.valueLabel
+          ? `${opts.valueLabel}  ·  ${fmt(b.value)}`
+          : `${fmt(b.value)}  ·  ${b.sub || b.label}`;
         return {
-          text: `${fmt(b.value)}  ·  ${b.sub || b.label}${trend}`,
+          text: `${head}${trend}`,
           left: Math.min(Math.max(pos[i], 50), W - 50),
           top: Math.min(py(b.value), t == null ? Infinity : py(t)),
         };
@@ -490,10 +515,15 @@ export function setChart(wrap, groups, opts = {}) {
     // height and the chart says nothing. The floor is printed on the axis, and
     // sits a margin below the lightest set so that set still reads as a bar
     // rather than a sliver on the baseline.
+    //
+    // Reps do start at zero. The range is small and countable — 5 to 12, not
+    // 40 to 60 — so a zero baseline costs almost no resolution and makes the
+    // line height mean the rep count itself rather than a distance above an
+    // arbitrary floor.
     const kMin = Math.min(...weights), kMax = Math.max(...weights);
     const floor = Math.max(0, kMin - ((kMax - kMin) || kMax * 0.1 || 1) * 0.2);
     const [R, K] = pairTicks(
-      { min: Math.min(...reps), max: Math.max(...reps), integer: true },
+      { min: 0, max: Math.max(...reps), integer: true },
       { min: floor, max: kMax },
     );
     const pyR = (v) => pad.t + ih - ((v - R.lo) / (R.hi - R.lo || 1)) * ih;
@@ -602,6 +632,11 @@ export function setChart(wrap, groups, opts = {}) {
         dots.forEach((d, j) => d.classList.toggle('on', sel.has(j)));
         rects.forEach((r, j) => r.classList.toggle('on', sel.has(j)));
       },
+      // A whole session lit from a sibling chart is several sets, and the
+      // tooltip can only read one out: the heaviest, so it lines up with what
+      // the top set chart is showing for the same session.
+      pick: (idx) => idx.reduce((best, j) =>
+        (Number(marks[j].set.weight) || 0) > (Number(marks[best].set.weight) || 0) ? j : best),
       describe: (i) => {
         const m = marks[i];
         const w = opts.format ? opts.format(Number(m.set.weight) || 0) : m.set.weight;

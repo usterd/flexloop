@@ -16,10 +16,21 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v11';
+self.APP_VERSION = 'flexloop-v12';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v12',
+    items: [
+      ['One tap reads the whole column',
+       'Picking a session in any per-exercise chart now opens the tooltip in all of them, so one touch answers what happened in that session.'],
+      ['Clearer tooltips',
+       'Volume per session reads “Total · 480 kg” above its trend line, and top set weight reads weight, then reps, then date.'],
+      ['Reps from zero',
+       'The rep axis of “Every set” starts at zero, so a dot’s height is the rep count itself. Its legend now lists the line before the bars.'],
+    ],
+  },
   {
     v: 'flexloop-v11',
     items: [

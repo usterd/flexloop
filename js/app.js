@@ -886,7 +886,7 @@ function renderExerciseProgress(root) {
 
     ${bodyweight ? '' : `<div class="card chart-card">
       <div class="chart-head"><p class="eyebrow">Every set</p>
-        <span class="note">BARS ${esc(unit().toUpperCase())} · LINE REPS</span></div>
+        <span class="note">LINE REPS · BARS ${esc(unit().toUpperCase())}</span></div>
       <div class="chart-wrap" id="c-sets"></div>
     </div>`}
 
@@ -949,13 +949,13 @@ function renderExerciseProgress(root) {
 
   barChart($('#c-svol'),
     series.map((p) => ({ x: p.ts, label: label(p), value: Math.round(p.volume), sub: label(p) })),
-    { format: (v) => S.fmtVolume(v, unit()), height: 140,
+    { format: (v) => S.fmtVolume(v, unit()), height: 140, valueLabel: 'Total',
       overlay: trend && trend.ready ? { values: trend.values, label: trend.label } : null,
       tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty, sync });
 
   if (!bodyweight) {
     lineChart($('#c-top'),
-      series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${label(p)} · ${p.topWeightReps} reps`, xlab: label(p) })),
+      series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${p.topWeightReps} reps · ${label(p)}`, xlab: label(p) })),
       { format: (v) => `${S.fmtNum(v)} ${unit()}`, tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
   }
 }

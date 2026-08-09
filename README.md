@@ -298,6 +298,12 @@ since there is nothing left to chart.
 - Nothing on a chart is highlighted until you tap it. A bar chart used to leave
   its newest bar lit by default, which read as a selection nobody had made and
   put a tooltip-less highlight on screen at all times.
+- The charts on Progress → Per exercise are one figure. Tapping a session in any
+  of them highlights that session in all of them **and** opens every tooltip in
+  the column, so one touch answers "what happened that day" without tapping the
+  same date three times. Where a session is several sets, the tooltip of "Every
+  set" reads out the heaviest of them, which is the set the chart below is
+  plotting anyway.
 - The trend line is drawn in chalk, not in the accent: orange already means
   "this is the bar you tapped", and a trend in the same colour would read as a
   selection stretched across the whole chart.
