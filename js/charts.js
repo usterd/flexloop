@@ -209,9 +209,15 @@ function bindSelection(wrap, cfg) {
   // reading is only as wide as its longest line and a second line makes it
   // taller. Both offsets are what `.tip`'s transform subtracts — half its
   // width to the left, 120% of its height upward.
-  const showTip = (i) => {
+  //
+  // `echo` marks a reading the thumb did not ask for: the tooltips in the
+  // sibling charts. All four carrying the same weight makes it ambiguous which
+  // chart was touched, so the echoes are drawn back and the one under the
+  // gesture stays at full strength.
+  const showTip = (i, echo = false) => {
     const d = describe(i);
     tip.textContent = d.text;
+    tip.classList.toggle('echo', echo);
     tip.hidden = false;
     const half = tip.offsetWidth / 2;
     const lo = half + 2, hi = W - half - 2;
@@ -238,7 +244,7 @@ function bindSelection(wrap, cfg) {
     paint(sel);
     if (!sel.size) { tip.hidden = true; return; }
     const idx = [...sel];
-    showTip(pick ? pick(idx) : idx[0]);
+    showTip(pick ? pick(idx) : idx[0], true);
   };
 
   const entry = { wrap, follow };
@@ -383,6 +389,30 @@ export function barChart(wrap, bars, opts = {}) {
       const v = ov ? ov.values[i] : null;
       return v == null || !isFinite(v) ? null : Number(v);
     };
+
+    /**
+     * Which way the overlay is moving at i, against its previous reading:
+     * 1 up, -1 down, 0 level, null when there is nothing to compare against.
+     * Reading two neighbouring averages is the whole point of averaging — the
+     * bars themselves saw-tooth, the line through them does not — so the arrow
+     * says what the tooltip's own number is doing, session over session.
+     * Gaps are skipped rather than treated as zeroes: a missing average is an
+     * unwarmed one, not a session where the trend collapsed.
+     */
+    const ovDir = (i) => {
+      const v = ovAt(i);
+      if (v == null) return null;
+      for (let j = i - 1; j >= 0; j--) {
+        const p = ovAt(j);
+        if (p == null) continue;
+        // An average lands on long decimals, and a move too small to change
+        // the printed value should not be arrowed as a climb.
+        const eps = Math.max(Math.abs(p) * 1e-3, 1e-9);
+        return v > p + eps ? 1 : v < p - eps ? -1 : 0;
+      }
+      return null;
+    };
+    const ARROW = { '1': '↑ ', '-1': '↓ ', '0': '→ ' };
     // An average never leaves the range of what it averages, but the axis is
     // built from whatever is actually drawn rather than from that assumption.
     const max = Math.max(
@@ -464,10 +494,13 @@ export function barChart(wrap, bars, opts = {}) {
         const b = bars[i];
         const fmt = opts.format || ((v) => String(v));
         // The trend gets its own line rather than a longer first one — on a
-        // 390px screen a two-value tooltip would run off the plot.
+        // 390px screen a two-value tooltip would run off the plot. The arrow
+        // leads the line, so the direction is read before the number.
         const t = ovAt(i);
+        const dir = ovDir(i);
+        const arrow = dir == null ? '' : ARROW[String(dir)];
         const trend = t == null ? '' :
-          `\n${ov.label ? `${ov.label}  ·  ` : ''}${(ov.format || fmt)(t)}`;
+          `\n${arrow}${ov.label ? `${ov.label}  ·  ` : ''}${(ov.format || fmt)(t)}`;
         const head = opts.valueLabel
           ? `${opts.valueLabel}  ·  ${fmt(b.value)}`
           : `${fmt(b.value)}  ·  ${b.sub || b.label}`;
@@ -637,11 +670,14 @@ export function setChart(wrap, groups, opts = {}) {
       // the top set chart is showing for the same session.
       pick: (idx) => idx.reduce((best, j) =>
         (Number(marks[j].set.weight) || 0) > (Number(marks[best].set.weight) || 0) ? j : best),
+      // No date in here: the session is already named under the group by the x
+      // tick, and every chart in the column reads out the same session at once
+      // — four copies of one date is three too many.
       describe: (i) => {
         const m = marks[i];
         const w = opts.format ? opts.format(Number(m.set.weight) || 0) : m.set.weight;
         return {
-          text: `${w} × ${m.set.reps}  ·  set ${m.setNo}  ·  ${m.group.label}`,
+          text: `${w} × ${m.set.reps}  ·  set ${m.setNo}`,
           left: Math.min(Math.max(m.cx, 60), W - 60),
           top: Math.min(pyR(Number(m.set.reps) || 0), pyK(Number(m.set.weight) || 0)),
         };

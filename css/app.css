@@ -895,6 +895,14 @@ select.input {
   line-height: 1.35;
   box-shadow: 0 6px 18px var(--shadow);
 }
+/* A tooltip raised by a sibling chart rather than by the thumb. One touch
+   answers the same question down the whole column, but only one of the four
+   readings was asked for: the echoes step back so the eye lands on the chart
+   that was actually touched, while staying legible enough to be read. */
+.tip.echo {
+  opacity: 0.55;
+  box-shadow: 0 4px 12px var(--shadow);
+}
 .chart-wrap { position: relative; }
 
 /* ------------------------------------------------------------ rest timer */
