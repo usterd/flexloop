@@ -341,7 +341,12 @@ export function lineChart(wrap, points, opts = {}) {
  * bars: [{ x: Number (ms timestamp or index, optional), label, value, sub }]
  *       Pass `x` whenever the bars share a timeline with a line chart above or
  *       below them; without it the bars fall back to evenly spaced indices.
- * opts: { height, format(v), highlightLast, sync }
+ * opts: { height, format(v), sync, overlay }
+ *
+ * `overlay` draws a second series over the bars — a moving average, say:
+ *   { values: (Number|null)[], label: String, format(v) -> String }
+ * `values` is index-aligned with `bars`; a null is a gap, not a zero, so the
+ * line simply starts later than the bars do.
  */
 export function barChart(wrap, bars, opts = {}) {
   const draw = () => {
@@ -351,7 +356,18 @@ export function barChart(wrap, bars, opts = {}) {
     const pad = { t: 10, r: PAD_R, b: 20, l: PAD_L };
     const ih = H - pad.t - pad.b;
 
-    const max = Math.max(...bars.map((b) => b.value), 0);
+    const ov = opts.overlay && Array.isArray(opts.overlay.values) ? opts.overlay : null;
+    const ovAt = (i) => {
+      const v = ov ? ov.values[i] : null;
+      return v == null || !isFinite(v) ? null : Number(v);
+    };
+    // An average never leaves the range of what it averages, but the axis is
+    // built from whatever is actually drawn rather than from that assumption.
+    const max = Math.max(
+      ...bars.map((b) => b.value),
+      ...bars.map((b, i) => ovAt(i) || 0),
+      0,
+    );
     const { hi, ticks } = niceTicks(0, max || 1, 2, !!opts.integer);
     const py = (v) => pad.t + ih - (v / (hi || 1)) * ih;
 
@@ -375,7 +391,7 @@ export function barChart(wrap, bars, opts = {}) {
     const rects = bars.map((b, i) => {
       const y = py(b.value);
       const r = svgEl('rect', {
-        class: 'bar' + (opts.highlightLast && i === bars.length - 1 ? ' on' : ''),
+        class: 'bar',
         x: pos[i] - bw / 2,
         y: b.value > 0 ? y : pad.t + ih - 1,
         width: bw,
@@ -386,6 +402,32 @@ export function barChart(wrap, bars, opts = {}) {
       return r;
     });
 
+    // Over the bars, so a trend stays readable where it crosses them. Drawn as
+    // separate runs: a gap in the values is a gap in the line, never a segment
+    // dropping to the baseline and back.
+    if (ov) {
+      let run = [];
+      const flush = () => {
+        if (run.length > 1) {
+          svg.appendChild(svgEl('path', {
+            class: 'trend',
+            d: run.map((p, j) => `${j ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(''),
+          }));
+        } else if (run.length === 1) {
+          // A single point is the whole average — worth a dot, or the setting
+          // looks as if it did nothing.
+          svg.appendChild(svgEl('circle', { class: 'trend-dot', cx: run[0][0], cy: run[0][1], r: 2.5 }));
+        }
+        run = [];
+      };
+      bars.forEach((b, i) => {
+        const v = ovAt(i);
+        if (v == null) return flush();
+        run.push([pos[i], py(v)]);
+      });
+      flush();
+    }
+
     xTickIndices(pos).forEach((i) => {
       const t = svgEl('text', { class: 'tick', x: pos[i], y: H - 6, 'text-anchor': 'middle' });
       t.textContent = bars[i].label;
@@ -395,15 +437,19 @@ export function barChart(wrap, bars, opts = {}) {
     bindSelection(wrap, {
       svg, W, top: pad.t, height: ih, pos, sync: opts.sync,
       xs: bars.map((b, i) => (b.x == null ? i : b.x)),
-      // With nothing picked the newest bar keeps its standing highlight.
-      paint: (sel) => rects.forEach((r, j) => r.classList.toggle(
-        'on', sel.has(j) || (opts.highlightLast && sel.size === 0 && j === bars.length - 1))),
+      paint: (sel) => rects.forEach((r, j) => r.classList.toggle('on', sel.has(j))),
       describe: (i) => {
         const b = bars[i];
+        const fmt = opts.format || ((v) => String(v));
+        // The trend gets its own line rather than a longer first one — on a
+        // 390px screen a two-value tooltip would run off the plot.
+        const t = ovAt(i);
+        const trend = t == null ? '' :
+          `\n${ov.label ? `${ov.label}  ·  ` : ''}${(ov.format || fmt)(t)}`;
         return {
-          text: `${opts.format ? opts.format(b.value) : b.value}  ·  ${b.sub || b.label}`,
+          text: `${fmt(b.value)}  ·  ${b.sub || b.label}${trend}`,
           left: Math.min(Math.max(pos[i], 50), W - 50),
-          top: py(b.value),
+          top: Math.min(py(b.value), t == null ? Infinity : py(t)),
         };
       },
     });

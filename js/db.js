@@ -122,6 +122,10 @@ const DEFAULT_SETTINGS = {
   weightStep: 2.5,
   repStep: 1,
   lastExportAt: 0,
+  // Trend line drawn over "Volume per session": 'off' | 'sma' | 'ema',
+  // averaged over this many sessions. See stats.movingAverage.
+  volumeTrend: 'sma',
+  volumeTrendPeriod: 5,
 };
 
 export function loadSettings() {

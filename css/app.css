@@ -736,6 +736,12 @@ select.input {
 .chart .dot.on { fill: var(--signal); }
 .chart .bar { fill: var(--edge-hi); }
 .chart .bar.on { fill: var(--signal); }
+/* The moving average sits over the bars in chalk, not in the accent: the
+   accent already means "this is the bar you tapped", and a trend line in the
+   same colour would read as a selection running across the whole chart. */
+.chart .trend { fill: none; stroke: var(--chalk); stroke-width: 2; opacity: 0.9;
+                stroke-linejoin: round; stroke-linecap: round; }
+.chart .trend-dot { fill: var(--chalk); opacity: 0.9; }
 .chart .hit { fill: transparent; pointer-events: all; }
 
 .tip {
@@ -751,7 +757,11 @@ select.input {
   padding: 5px 8px;
   border-radius: 7px;
   pointer-events: none;
-  white-space: nowrap;
+  /* `pre`, not `nowrap`: a tooltip carrying a trend value puts it on a second
+     line, and neither line may wrap. */
+  white-space: pre;
+  text-align: center;
+  line-height: 1.35;
   box-shadow: 0 6px 18px rgba(0,0,0,.5);
 }
 .chart-wrap { position: relative; }

@@ -265,6 +265,79 @@ export function weekStreak(sessions) {
   return streak;
 }
 
+/* --------------------------------------------------------- moving average */
+
+/**
+ * The trend overlay offered on the per-session volume chart.
+ * `off` is a real option rather than an absence, so the setting always holds
+ * one of these ids and the Data tab can round-trip it.
+ */
+export const MA_MODES = [
+  { id: 'off', label: 'None', short: '' },
+  { id: 'sma', label: 'Simple moving average', short: 'SMA' },
+  { id: 'ema', label: 'Exponential moving average', short: 'EMA' },
+];
+
+/** Sessions per average. Small numbers: a gym history is short. */
+export const MA_PERIODS = [3, 5, 8, 10, 12];
+
+export const MA_DEFAULT_PERIOD = 5;
+
+export function maMode(id) {
+  return MA_MODES.find((m) => m.id === id) || MA_MODES[0];
+}
+
+/** Clamp whatever came out of storage onto the offered list. */
+export function maPeriod(n) {
+  const v = parseInt(n, 10);
+  if (!isFinite(v)) return MA_DEFAULT_PERIOD;
+  return Math.min(Math.max(v, MA_PERIODS[0]), MA_PERIODS[MA_PERIODS.length - 1]);
+}
+
+/**
+ * Moving average over `values`, index-aligned with them.
+ *
+ * The first `period - 1` entries are null: an average of fewer sessions than
+ * asked for is a different, noisier statistic, and drawing it would make the
+ * left edge of the line look like a trend that isn't there. Callers skip nulls
+ * rather than plotting a zero.
+ *
+ * Both kinds start at the same index and from the same number — the EMA is
+ * seeded with the simple average of its first window rather than with the
+ * first value — so switching between them in settings moves the shape of the
+ * line without moving where it begins.
+ *
+ * kind: 'sma' | 'ema'. Anything else (including 'off') returns all nulls.
+ */
+export function movingAverage(values, period = MA_DEFAULT_PERIOD, kind = 'sma') {
+  const n = values.length;
+  const p = Math.max(1, Math.round(period));
+  const out = new Array(n).fill(null);
+  if ((kind !== 'sma' && kind !== 'ema') || n < p) return out;
+
+  let sum = 0;
+  for (let i = 0; i < p; i++) sum += Number(values[i]) || 0;
+  const seed = sum / p;
+
+  if (kind === 'sma') {
+    out[p - 1] = seed;
+    for (let i = p; i < n; i++) {
+      sum += (Number(values[i]) || 0) - (Number(values[i - p]) || 0);
+      out[i] = sum / p;
+    }
+    return out;
+  }
+
+  const k = 2 / (p + 1);
+  let prev = seed;
+  out[p - 1] = prev;
+  for (let i = p; i < n; i++) {
+    prev = (Number(values[i]) || 0) * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------ time windows */
 
 export const WINDOWS = [
