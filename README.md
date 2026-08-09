@@ -89,8 +89,11 @@ Run this once after installing. It takes about three minutes.
    open" error, the worker did not install — repeat from step 1 while online.
 6. **Log while offline.** Start a session, add an exercise, tap `+` on weight,
    mark the set done. The rest timer should start.
-7. **Check the ghost.** Add the same exercise again in a new session. The
-   "Last …" line under its name must show what you just did.
+7. **Check the ghost and the target.** Add the same exercise again in a new
+   session. The "Last …" line under its name must show what you just did, and
+   the "Beat …" line under that must name a number and what would clear it.
+   Tick a set that clears it: the line turns accent, the row is marked, the
+   phone buzzes, and a toast names the new number.
 8. **Render a chart.** Tap the exercise's name on its card in the Log. Progress →
    Per exercise should open on that exercise and the estimated 1RM chart should
    draw. Tap a point; a tooltip appears.
@@ -173,6 +176,22 @@ Weight step labels follow the unit setting; switching kg → lb relabels the lis
 rather than converting it, since the number you want is a property of your plates,
 not of the previous unit.
 
+### Motivation
+
+**Target to beat** picks the metric behind three things at once: the target line
+on every Log card, the *Next target* tile on Progress → Per exercise, and the
+read-out when a session is finished. The choices are estimated 1RM (the default),
+heaviest set, reps at your working weight, volume, or **None**, which removes all
+three. A lift that has never carried a load is always measured in reps, whatever
+is selected — its e1RM, top weight and volume are all zero, and a target of zero
+is no target.
+
+The number aimed at is the **nearer of two**: last session's, while you are still
+under it, and your all-time best once you are past it. That keeps it reachable
+after a layoff without letting it go slack once you are climbing. The session
+being logged is excluded from its own history — otherwise clearing the target
+would raise it in the same instant and the line could never read as beaten.
+
 ### Plot settings
 
 The moving-average controls have their own header, apart from the logging
@@ -184,8 +203,8 @@ all, by design.
 
 ## Version history
 
-The foot of Settings reads `flexloop · v11 · offline`. That `v11` is the build,
-and the offline cache is named after it (`flexloop-v11`); tapping it opens the
+The foot of Settings reads `flexloop · v13 · offline`. That `v13` is the build,
+and the offline cache is named after it (`flexloop-v13`); tapping it opens the
 changelog — what changed in each release, newest first, a line or two per thing.
 The changelog lives in `js/version.js` beside the version itself, so bumping one
 without the other is hard to miss.
@@ -238,7 +257,7 @@ js/version.js           the version string + changelog, shared by sw.js and app.
 js/app.js               routing, views, all interaction
 js/db.js                IndexedDB wrapper (exercises, sessions, routines),
                         export/import, settings
-js/stats.js             e1RM, volume, PRs, weekly aggregates, dates
+js/stats.js             e1RM, volume, PRs, targets, weekly aggregates, dates
 js/charts.js            hand-written SVG line and bar charts
 js/importers.js         Strongify CSV reader
 icons/                  192, 512, and the 180px apple-touch-icon
@@ -271,6 +290,17 @@ an origin. `python3 -m http.server` is enough for local work.)
   reps, so a 5-rep PR is never beaten only on a technicality.
 - **Week streak** — consecutive Monday-anchored weeks containing at least one
   session. Not having trained yet this week does not break a live streak.
+- **The target to beat** — the metric's own formula, run backwards. For e1RM that
+  is Epley inverted: the reps needed at today's weight are
+  `floor(30 × (target / weight − 1)) + 1`, and the weight needed at today's reps
+  is `target / (1 + reps / 30)`, rounded up to the next weight step. Both are
+  strict — a set that merely ties the target does not clear it. Suggestions above
+  20 reps, or more than 12 extra sets of volume, are dropped rather than printed:
+  past that they stop being targets. Warmups are excluded, as everywhere else.
+- **Sessions climbing** — consecutive session-to-session improvements in the
+  chosen metric, counting back from the most recent. A plateau ends the run; one
+  improvement spans two sessions, which is why the label reads one higher than
+  the count.
 
 ## Design notes
 
@@ -281,6 +311,13 @@ stepper. The one deliberate flourish is the **ghost line**: last session's weigh
 and reps sit under every exercise as you log, in dim mono, so the loop from last
 time to this time is always on screen without a tap. That is also why new sets
 prefill themselves — typing should be rare.
+
+Directly under it, built the same way and sharing its leading rule, sits the
+**target**: what would beat that number today. The two read as one block — what
+you did, then what would beat it — and the target is deliberately a derived line
+rather than a stored goal, for the same reason routines hold no target weights:
+a number the app works out from your history cannot go stale, and a second place
+to keep it would only disagree with the first.
 
 Tapping an exercise's **name** on a card — while logging, or in any saved session —
 opens Progress → Per exercise on that exercise. The small chart glyph beside the

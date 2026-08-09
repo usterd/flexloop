@@ -16,10 +16,25 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v12';
+self.APP_VERSION = 'flexloop-v13';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v13',
+    items: [
+      ['A target under the ghost',
+       'Each exercise card says what would beat your own number today — “Beat 94.5 kg e1RM · 80×7”. It updates as you log and says so once you clear it.'],
+      ['Tick the set that beats it',
+       'The row is marked, the phone buzzes, and a toast names the new number the moment a set carries the exercise past its target.'],
+      ['Next target, and a streak',
+       'Progress → Per exercise gains what it would take to beat your all-time best, how long that best has stood, and whether recent sessions are climbing.'],
+      ['Finishing reads back',
+       'A session ends with a per-exercise read-out — best ever, up, level or down — instead of a one-line toast.'],
+      ['Pick the metric',
+       'Settings → Motivation chooses what all of that measures: estimated 1RM, heaviest set, reps at your working weight, volume, or none.'],
+    ],
+  },
   {
     v: 'flexloop-v12',
     items: [
