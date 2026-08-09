@@ -184,10 +184,11 @@ all, by design.
 
 ## Version history
 
-The foot of Settings prints the build version — `flexloop-v11`, the same string
-the offline cache is named after. Tapping it opens the changelog: what changed in
-each release, newest first, a line or two per thing. It lives in `js/version.js`
-beside the version itself, so bumping one without the other is hard to miss.
+The foot of Settings reads `flexloop · v11 · offline`. That `v11` is the build,
+and the offline cache is named after it (`flexloop-v11`); tapping it opens the
+changelog — what changed in each release, newest first, a line or two per thing.
+The changelog lives in `js/version.js` beside the version itself, so bumping one
+without the other is hard to miss.
 
 ## The info button
 

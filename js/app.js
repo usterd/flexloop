@@ -17,9 +17,15 @@ import * as S from './stats.js';
 import { lineChart, barChart, setChart } from './charts.js';
 import { parseStrongifyCsv, looksLikeStrongify } from './importers.js';
 
-/** The string the service worker caches under, printed in Settings. */
+/** The string the service worker caches under. */
 const APP_VERSION = self.APP_VERSION || 'flexloop';
 const CHANGELOG = self.APP_CHANGELOG || [];
+
+/**
+ * The same version without the app name, for the Settings footer — which
+ * already says "flexloop" one word earlier and does not need to say it twice.
+ */
+const VERSION_SHORT = APP_VERSION.replace(/^flexloop-/, '');
 
 /**
  * Days without an export before Settings starts asking for one. iOS clears
@@ -1273,9 +1279,9 @@ async function viewSettings() {
 
     <hr class="sep">
     <button class="btn btn-danger btn-block" data-act="erase">Erase all data</button>
-    <p class="meta">
-      <button type="button" class="linkish" data-act="version">${esc(APP_VERSION)}</button>
-      · schema v${db.SCHEMA_VERSION} · offline</p>`;
+    <p class="meta">flexloop ·
+      <button type="button" class="linkish" data-act="version">${esc(VERSION_SHORT)}</button>
+      · offline</p>`;
 }
 
 function viewExercises() {
@@ -2103,7 +2109,7 @@ const INFO = {
       ['Theme',
        'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
       ['The version at the foot',
-       'Tap it for the version history — what changed in each release. It is the same string the offline cache is named after, so it changes whenever the app does.'],
+       `Tap it for the version history — what changed in each release. The offline cache is named after it (${APP_VERSION}), so it changes whenever the app itself does.`],
     ],
   },
 };
