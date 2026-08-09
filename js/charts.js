@@ -279,8 +279,8 @@ export function lineChart(wrap, points, opts = {}) {
     const gid = `loopfade${++uid}`;
     const defs = svgEl('defs');
     const grad = svgEl('linearGradient', { id: gid, x1: '0', y1: '0', x2: '0', y2: '1' });
-    grad.appendChild(svgEl('stop', { offset: '0', 'stop-color': '#FFB020', 'stop-opacity': '.22' }));
-    grad.appendChild(svgEl('stop', { offset: '1', 'stop-color': '#FFB020', 'stop-opacity': '0' }));
+    grad.appendChild(svgEl('stop', { offset: '0', class: 'fade-in' }));
+    grad.appendChild(svgEl('stop', { offset: '1', class: 'fade-out' }));
     defs.appendChild(grad);
     svg.appendChild(defs);
 

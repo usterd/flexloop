@@ -114,12 +114,23 @@ export const deleteRoutine = (id) => del(STORE_RO, id);
 
 const SETTINGS_KEY = 'flexloop.settings';
 
+/**
+ * The values the Rest timer and Weight step dropdowns offer. They are stored
+ * rather than hard-coded because the Settings tab lets you edit both lists —
+ * 3.75 kg plates and a 75 second rest are perfectly reasonable and nothing in
+ * the app should have an opinion about them.
+ */
+export const DEFAULT_REST_OPTIONS = [60, 90, 120, 150, 180, 240, 300];
+export const DEFAULT_WEIGHT_STEPS = [1, 1.25, 2.5, 5];
+
 const DEFAULT_SETTINGS = {
   unit: 'kg',              // display unit for every weight
-  theme: 'dark',
+  theme: 'dark',           // 'dark' | 'light' | 'auto' (follow the system)
   restTimerSeconds: 120,
+  restTimerOptions: DEFAULT_REST_OPTIONS,
   restTimerAuto: true,     // start the timer when a set is marked done
   weightStep: 2.5,
+  weightStepOptions: DEFAULT_WEIGHT_STEPS,
   repStep: 1,
   lastExportAt: 0,
   // Trend line drawn over "Volume per session": 'off' | 'sma' | 'ema',
@@ -128,13 +139,29 @@ const DEFAULT_SETTINGS = {
   volumeTrendPeriod: 5,
 };
 
+/**
+ * Fill in anything the stored object is missing.
+ *
+ * The two list settings are copied, never shared: Object.assign would hand
+ * out the very array held by DEFAULT_SETTINGS, and the first edit in the
+ * option editor would then rewrite the defaults for the rest of the session.
+ */
+function withDefaults(stored) {
+  const s = Object.assign({}, DEFAULT_SETTINGS, stored || {});
+  s.restTimerOptions = Array.isArray(s.restTimerOptions)
+    ? s.restTimerOptions.slice() : DEFAULT_REST_OPTIONS.slice();
+  s.weightStepOptions = Array.isArray(s.weightStepOptions)
+    ? s.weightStepOptions.slice() : DEFAULT_WEIGHT_STEPS.slice();
+  return s;
+}
+
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return Object.assign({}, DEFAULT_SETTINGS, raw ? JSON.parse(raw) : {});
+    return withDefaults(raw ? JSON.parse(raw) : null);
   } catch (err) {
     console.warn('settings unreadable, using defaults', err);
-    return Object.assign({}, DEFAULT_SETTINGS);
+    return withDefaults(null);
   }
 }
 
@@ -198,7 +225,7 @@ export async function importAll(data, mode = 'replace') {
   await putMany(STORE_SE, data.sessions);
   if (routines.length) await putMany(STORE_RO, routines);
   if (data.settings && mode === 'replace') {
-    saveSettings(Object.assign({}, DEFAULT_SETTINGS, data.settings));
+    saveSettings(withDefaults(data.settings));
   }
   return {
     exercises: data.exercises.length,

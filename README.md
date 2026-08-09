@@ -87,7 +87,7 @@ Run this once after installing. It takes about three minutes.
    "Start from a routine" on the Log. Tap it — the sets should already be there.
 10. **Reboot the phone.** Still in airplane mode, relaunch from the Home Screen.
     Everything from steps 6–9 must still be there.
-11. **Export:** go to Data → Export backup and confirm a `flexloop-YYYY-MM-DD.json`
+11. **Export:** go to Settings → Export backup and confirm a `flexloop-YYYY-MM-DD.json`
     lands in your Files app. (export never touches the network)
 
 Step 11 is not optional. iOS clears the storage of sites it considers unused, and
@@ -98,11 +98,11 @@ file is the only real backup.
 
 ## Importing your history
 
-**Data → Import Strongify CSV** reads a Strongify backup and merges it in. Sets
+**Settings → Import Strongify CSV** reads a Strongify backup and merges it in. Sets
 recorded on the same calendar day become one session; the routine name is kept as
 the session note. Nothing already on the device is deleted.
 
-**Data → Import backup** restores a flexloop `.json` export. This one *replaces*
+**Settings → Import backup** restores a flexloop `.json` export. This one *replaces*
 everything, and asks first.
 
 ## Routines
@@ -118,7 +118,7 @@ Two ways to make one:
   did along with the number of working sets each got. Warmups are not part of the
   plan, so they are left out. The name is prefilled with whichever muscle group
   dominates the session.
-- **Data → Manage routines → New routine** builds one from scratch.
+- **Settings → Manage routines → New routine** builds one from scratch.
 
 Starting a routine from the Log opens a session with every set already laid out
 and prefilled. Start one while a session is already open and it offers to fold the
@@ -127,6 +127,71 @@ at once. Exercises you have since deleted are skipped, and the toast says how ma
 
 Backups carry routines from schema v2 onward. A v1 backup still imports — it simply
 has none.
+
+## The Settings tab
+
+Everything that is not logging lives here: backups, preferences, plot settings,
+routines, the exercise list, and storage. (It was called *Data* until the tab was
+renamed; `#/data` still redirects to `#/settings`, so an old bookmark or a Home
+Screen icon left on that tab keeps working.)
+
+### Editable dropdowns
+
+**Rest timer** and **Weight step** are dropdowns whose contents you choose. Both
+end in **Edit this list…**, which opens an editor where you can
+
+- add a value of your own — 75 seconds, a 3.75 kg plate pair,
+- remove ones you never pick, down to a last one that cannot be removed,
+- or reset the list to the defaults.
+
+The list and the chosen value are stored separately (`restTimerOptions` /
+`restTimerSeconds`, `weightStepOptions` / `weightStep`) and both ride along in a
+backup. Values are cleaned on the way in and out — deduplicated, sorted, clamped
+to 5–3600 seconds and 0.25–100 units — so a hand-edited backup cannot put a
+broken choice in the dropdown. Remove the value currently in use and the setting
+moves to the **nearest remaining one**, never silently back to a default.
+
+Weight step labels follow the unit setting; switching kg → lb relabels the list
+rather than converting it, since the number you want is a property of your plates,
+not of the previous unit.
+
+### Plot settings
+
+The moving-average controls have their own header, apart from the logging
+preferences: they change what a chart draws, not what a button does. The note
+under **Averaged over** spells out the arithmetic for whichever kind is selected.
+
+## The info button
+
+The (i) beside the wordmark explains **the tab you are on** — the Log's
+long-press gestures, what History groups and how to delete a session, how
+Progress computes e1RM and volume, and on Settings the editable dropdowns, the
+two moving averages, and why exporting regularly is not optional. One entry per
+tab, in `INFO` at the bottom of `app.js`.
+
+## Light and dark
+
+The whole palette is a set of CSS custom properties in `:root`, and the light
+theme is the same names with different values under `:root[data-theme="light"]` —
+nothing downstream knows which one is live. Tokens are named for their role, so
+`--ink` is always "the page" and `--chalk` always "text on it"; they swap ends of
+the scale rather than gaining a second rule. The accent darkens to `#B26A00` in
+light mode (`#FFB020` on white is about 1.9:1 and unreadable), and `--on-signal`
+carries whatever has to sit on top of an accent fill.
+
+- The **sun/moon beside the wordmark** flips between light and dark from any
+  screen. **Settings → Appearance** adds *Match system*, which follows
+  `prefers-color-scheme` live.
+- The stored value is `theme: 'dark' | 'light' | 'auto'`. `auto` is resolved in
+  JavaScript, not in CSS, so `data-theme` on `<html>` always states which palette
+  is actually on screen.
+- A small inline script in `index.html` applies the theme **before first paint**.
+  `app.js` is a module and therefore deferred; without it a light-theme user gets
+  a dark flash on every launch. It is deliberately duplicated logic — it has to
+  run without importing anything.
+- Charts inherit all of it: their colours are the same variables, including the
+  area gradient, whose stops are styled from CSS because an SVG `stop-color`
+  attribute cannot hold a custom property.
 
 ## Files
 
@@ -157,7 +222,7 @@ an origin. `python3 -m http.server` is enough for local work.)
 - **Volume** — `Σ weight × reps` across completed sets. Warmups are excluded
   everywhere, including from personal records.
 - **Volume trend line** — the moving average drawn over *Volume per session* in
-  Progress → Per exercise. **Data → Preferences → Volume trend line** picks
+  Progress → Per exercise. **Settings → Plot settings → Volume trend line** picks
   between none, a simple average and an exponential one, and how many sessions
   it runs over (5 by default). The exponential average weights recent sessions
   more heavily (`k = 2 / (n + 1)`) and is seeded with the simple average of its
@@ -174,7 +239,8 @@ an origin. `python3 -m http.server` is enough for local work.)
 
 ## Design notes
 
-Dark, high contrast, one accent (`#FFB020`), system fonts only. Numbers are set in
+High contrast, one accent, system fonts only — dark by default, with a light
+theme carrying the same shapes and spacing. Numbers are set in
 the system monospace with tabular figures so digits do not jump as you tap a
 stepper. The one deliberate flourish is the **ghost line**: last session's weight
 and reps sit under every exercise as you log, in dim mono, so the loop from last
@@ -189,7 +255,7 @@ since there is nothing left to chart.
 
 ## Assumptions made while building
 
-- Default unit is **kg**, weight step **2.5**, rep step **1**. All changeable in Data.
+- Default unit is **kg**, weight step **2.5**, rep step **1**. All changeable in Settings.
 - **RPE** is kept in the data model but not surfaced in the UI; it was clutter on a
   390px screen. The field is there if you want it back.
 - Charts are hand-written SVG rather than a vendored library — no dependency, and
@@ -208,6 +274,13 @@ since there is nothing left to chart.
   preserved, but there is no UI for it.
 - A routine stores no weights, and no days-of-the-week schedule. It is a list to
   work down, not a programme to obey.
+- The theme defaults to **dark**, not to the system setting. *Match system* is one
+  tap away for anyone who wants it, but a gym at 6am is not a place to be handed a
+  white screen because the phone thinks it is daytime.
+- In light mode the iOS status bar style is switched from `black-translucent` to
+  `default`, because a translucent bar draws the clock in white and a light page
+  would leave it invisible. iOS reads that meta tag while parsing the head, so a
+  theme changed mid-session only reaches the status bar at the next launch.
 
 ## Licence
 
