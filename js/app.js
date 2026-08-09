@@ -37,6 +37,67 @@ const esc = (s) => String(s == null ? '' : s)
 const uid = (p) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const unit = () => state.settings.unit;
 
+/* ------------------------------------------------------------------ theme
+
+   Two palettes, one set of CSS variable names — see the header of app.css.
+   The stored preference is 'dark' | 'light' | 'auto'; 'auto' is resolved
+   here rather than in CSS so that one attribute on <html> always states
+   which palette is actually live, and the topbar toggle has something
+   definite to flip. index.html repeats this resolution inline so the first
+   paint is already in the right theme.                                     */
+
+const THEMES = [
+  { id: 'dark',  label: 'Dark' },
+  { id: 'light', label: 'Light' },
+  { id: 'auto',  label: 'Match system' },
+];
+
+/* Must match --ink in each palette: this is the colour iOS paints behind
+   the status bar and around the safe areas. */
+const THEME_INK = { dark: '#08090B', light: '#F6F7F9' };
+
+const ICON_SUN = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.3M12 19.3v2.3M2.4 12h2.3M19.3 12h2.3M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>`;
+const ICON_MOON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.7 8.7 0 1 0 11.1 11.1z"/></svg>`;
+
+const lightMedia = window.matchMedia('(prefers-color-scheme: light)');
+
+const systemTheme = () => (lightMedia.matches ? 'light' : 'dark');
+
+/** The palette actually on screen — never 'auto'. */
+function effectiveTheme() {
+  const t = state.settings.theme;
+  if (t === 'auto') return systemTheme();
+  return t === 'light' ? 'light' : 'dark';
+}
+
+function applyTheme() {
+  const t = effectiveTheme();
+  document.documentElement.dataset.theme = t;
+  const meta = $('#theme-color');
+  if (meta) meta.setAttribute('content', THEME_INK[t]);
+  // iOS only reads this one while parsing the head — index.html sets it there
+  // too. Kept in step here so the next launch starts from the right value.
+  const bar = $('#ios-status-bar');
+  if (bar) bar.setAttribute('content', t === 'light' ? 'default' : 'black-translucent');
+  const btn = $('#theme-btn');
+  if (btn) {
+    // The button shows the theme you would get, not the one you are in.
+    btn.innerHTML = t === 'dark' ? ICON_SUN : ICON_MOON;
+    btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  }
+}
+
+function setTheme(id) {
+  state.settings.theme = THEMES.some((t) => t.id === id) ? id : 'dark';
+  db.saveSettings(state.settings);
+  applyTheme();
+}
+
+// Following the system means following it as it changes, not only at launch.
+lightMedia.addEventListener('change', () => {
+  if (state.settings.theme === 'auto') applyTheme();
+});
+
 /* ------------------------------------------------------------------ toast */
 
 let toastTimer = null;
@@ -179,7 +240,7 @@ const routes = [
   [/^#\/history$/,          () => viewHistory()],
   [/^#\/session\/(.+)$/,    (m) => viewSession(m[1])],
   [/^#\/progress$/,         () => viewProgress()],
-  [/^#\/data$/,             () => viewData()],
+  [/^#\/settings$/,         () => viewSettings()],
   [/^#\/exercises$/,        () => viewExercises()],
   [/^#\/routines$/,         () => viewRoutines()],
   [/^#\/routine\/(.+)$/,    (m) => viewRoutine(m[1])],
@@ -189,12 +250,15 @@ function currentTab() {
   const h = location.hash;
   if (h.startsWith('#/history') || h.startsWith('#/session')) return 'history';
   if (h.startsWith('#/progress')) return 'progress';
-  if (h.startsWith('#/data') || h.startsWith('#/exercises') || h.startsWith('#/routine')) return 'data';
+  if (h.startsWith('#/settings') || h.startsWith('#/exercises') || h.startsWith('#/routine')) return 'settings';
   return 'log';
 }
 
 async function render() {
   if (!location.hash || location.hash === '#') { location.replace('#/log'); return; }
+  // The Data tab became Settings. Old bookmarks, and the Home Screen icon of
+  // anyone who left the app on that tab, still point at #/data.
+  if (location.hash === '#/data') { location.replace('#/settings'); return; }
   const hash = location.hash;
   const hit = routes.find(([re]) => re.test(hash));
   const view = $('#view');
@@ -213,6 +277,9 @@ async function render() {
     if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page');
     else t.removeAttribute('aria-current');
   });
+  // The info button explains whatever is on screen, so its label moves too.
+  const info = $('#info-btn');
+  if (info) info.setAttribute('aria-label', `About ${INFO[tab].title}`);
 }
 
 window.addEventListener('hashchange', render);
@@ -671,7 +738,7 @@ function viewProgress() {
 function renderOverview(root) {
   if (!state.sessions.length) {
     root.innerHTML = `<div class="empty"><div class="glyph"></div><h3>No data yet</h3>
-      <p>Charts appear once you've logged a session. You can also import a backup from Data.</p>
+      <p>Charts appear once you've logged a session. You can also import a backup from Settings.</p>
       <a class="btn btn-primary" href="#/log">Start a session</a></div>`;
     return;
   }
@@ -873,10 +940,195 @@ function renderExerciseProgress(root) {
 }
 
 /* ==========================================================================
-   VIEW: DATA & SETTINGS
+   EDITABLE OPTION LISTS
+
+   Rest timer and Weight step are dropdowns whose contents you can change.
+   Both work the same way: the stored setting holds one chosen value plus the
+   list of values on offer, the last entry of the select is "Edit this list…",
+   and choosing it opens the editor instead of picking anything.
+
+   Every list passes through sanitize() on the way in and out, so a hand-edited
+   backup, a duplicate, or a value from the wrong unit cannot put a broken
+   choice in front of you.
    ========================================================================== */
 
-async function viewData() {
+const OPTION_MAX = 16;
+const OPTION_EDIT = '__edit';
+
+/** Seconds as something readable: 45s · 2 min · 1 min 15s. */
+function fmtSeconds(v) {
+  const n = Math.round(Number(v) || 0);
+  if (n < 60) return `${n}s`;
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return s ? `${m} min ${s}s` : `${m} min`;
+}
+
+const OPTION_LISTS = {
+  restTimerSeconds: {
+    key: 'restTimerOptions',
+    defaults: db.DEFAULT_REST_OPTIONS,
+    title: 'Rest timer values',
+    body: 'What the Rest timer dropdown offers. Anything from 5 seconds to an hour.',
+    addLabel: 'Add a value, in seconds',
+    placeholder: '75',
+    inputMode: 'numeric',
+    invalid: 'Enter a whole number of seconds between 5 and 3600.',
+    clean: (v) => {
+      const n = Math.round(Number(String(v).replace(',', '.')));
+      return isFinite(n) && n >= 5 && n <= 3600 ? n : null;
+    },
+    format: fmtSeconds,
+  },
+  weightStep: {
+    key: 'weightStepOptions',
+    defaults: db.DEFAULT_WEIGHT_STEPS,
+    title: 'Weight step values',
+    body: 'What one tap of − or + moves a weight by. Match it to the smallest plate pair you own.',
+    addLabel: () => `Add a value, in ${unit()}`,
+    placeholder: '1.25',
+    inputMode: 'decimal',
+    invalid: 'Enter a weight between 0.25 and 100.',
+    clean: (v) => {
+      const n = Math.round(Number(String(v).replace(',', '.')) * 100) / 100;
+      return isFinite(n) && n >= 0.25 && n <= 100 ? n : null;
+    },
+    // Not fmtNum: it pads to the requested places, and 2.50 kg beside 1 kg
+    // reads as a precision the plates do not have. clean() already rounded.
+    format: (v) => `${v} ${unit()}`,
+  },
+};
+
+const optionLabel = (spec, field) =>
+  (typeof spec[field] === 'function' ? spec[field]() : spec[field]);
+
+/**
+ * A clean, sorted, de-duplicated list. `keep` is the value currently in use:
+ * it is added back if it is missing, because a setting you cannot see in its
+ * own dropdown reads as the app having forgotten it.
+ */
+function sanitizeOptions(spec, list, keep = null) {
+  const seen = new Set();
+  const out = [];
+  const add = (v) => {
+    const n = spec.clean(v);
+    if (n == null || seen.has(n)) return;
+    seen.add(n);
+    out.push(n);
+  };
+  (Array.isArray(list) ? list : []).forEach(add);
+  add(keep);
+  if (!out.length) spec.defaults.forEach(add);
+  out.sort((a, b) => a - b);
+  if (out.length <= OPTION_MAX) return out;
+  // Trim from the end, but never drop the value in use.
+  const kept = spec.clean(keep);
+  const cut = out.slice(0, OPTION_MAX);
+  if (kept != null && !cut.includes(kept)) cut[cut.length - 1] = kept;
+  return cut.sort((a, b) => a - b);
+}
+
+/** The offered values for a setting, always including the one in use. */
+function optionValues(id) {
+  const spec = OPTION_LISTS[id];
+  return sanitizeOptions(spec, state.settings[spec.key], state.settings[id]);
+}
+
+function optionSelectHtml(id, domId) {
+  const spec = OPTION_LISTS[id];
+  const current = spec.clean(state.settings[id]);
+  return `<select class="input" id="${domId}" data-pref="${id}" data-options="${id}">
+      ${optionValues(id).map((v) => `<option value="${v}"
+        ${v === current ? 'selected' : ''}>${esc(spec.format(v))}</option>`).join('')}
+      <option value="${OPTION_EDIT}">Edit this list…</option>
+    </select>`;
+}
+
+/** Write a list back, keeping the chosen value valid. */
+function saveOptions(id, values) {
+  const spec = OPTION_LISTS[id];
+  const list = sanitizeOptions(spec, values, null);
+  state.settings[spec.key] = list;
+  if (!list.includes(spec.clean(state.settings[id]))) {
+    // The value in use was just removed. Fall to its nearest neighbour rather
+    // than to a default, so a 2.5 kg step becomes 2 and not 2.5 again.
+    const cur = spec.clean(state.settings[id]);
+    state.settings[id] = list.reduce((best, v) =>
+      (Math.abs(v - cur) < Math.abs(best - cur) ? v : best), list[0]);
+  }
+  db.saveSettings(state.settings);
+  return list;
+}
+
+function editOptionsSheet(id) {
+  const spec = OPTION_LISTS[id];
+
+  const rowsHtml = (values) => values.map((v) => `
+    <div class="opt-row">
+      <span class="opt-v">${esc(spec.format(v))}</span>
+      ${values.length > 1
+        ? `<button class="btn btn-sm btn-quiet" data-rm="${v}"
+             aria-label="Remove ${esc(spec.format(v))}">Remove</button>`
+        : `<span class="opt-note">the last one</span>`}
+    </div>`).join('');
+
+  openSheet(`
+    <h2>${esc(spec.title)}</h2>
+    <p class="sub">${esc(spec.body)}</p>
+    <div class="opt-list" data-list>${rowsHtml(optionValues(id))}</div>
+    <div class="field" style="margin-top:14px">
+      <label for="opt-add">${esc(optionLabel(spec, 'addLabel'))}</label>
+      <div class="btn-row">
+        <input class="input" id="opt-add" inputmode="${spec.inputMode}"
+               enterkeyhint="done" autocomplete="off" placeholder="${esc(spec.placeholder)}">
+        <button class="btn" data-x="add" style="flex:0 0 auto">Add</button>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:4px">
+      <button class="btn btn-sm btn-quiet" data-x="reset">Reset to defaults</button>
+      <button class="btn btn-sm btn-primary" data-x="done">Done</button>
+    </div>`, (root) => {
+    const input = $('#opt-add', root);
+    const redraw = (values) => { $('[data-list]', root).innerHTML = rowsHtml(values); };
+
+    const add = () => {
+      const n = spec.clean(input.value);
+      if (n == null) { toast(spec.invalid); return; }
+      const values = optionValues(id);
+      if (values.includes(n)) { toast(`${spec.format(n)} is already in the list`); return; }
+      if (values.length >= OPTION_MAX) { toast(`That is as many as the list holds (${OPTION_MAX})`); return; }
+      redraw(saveOptions(id, values.concat([n])));
+      input.value = '';
+      toast(`Added ${spec.format(n)}`);
+    };
+
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+
+    root.addEventListener('click', (e) => {
+      const rm = e.target.closest('[data-rm]');
+      if (rm) {
+        const gone = Number(rm.dataset.rm);
+        redraw(saveOptions(id, optionValues(id).filter((v) => v !== gone)));
+        toast(`Removed ${spec.format(gone)}`);
+        return;
+      }
+      const b = e.target.closest('[data-x]');
+      if (!b) return;
+      if (b.dataset.x === 'add') add();
+      if (b.dataset.x === 'reset') {
+        redraw(saveOptions(id, spec.defaults.slice()));
+        toast('List reset');
+      }
+      if (b.dataset.x === 'done') { closeSheet(); render(); }
+    });
+  });
+}
+
+/* ==========================================================================
+   VIEW: SETTINGS  (was "Data" — same tab, same glyph)
+   ========================================================================== */
+
+async function viewSettings() {
   const est = await db.storageEstimate();
   const persisted = navigator.storage && navigator.storage.persisted
     ? await navigator.storage.persisted().catch(() => false) : false;
@@ -886,8 +1138,8 @@ async function viewData() {
   const trendPeriod = S.maPeriod(state.settings.volumeTrendPeriod);
 
   $('#view').innerHTML = `
-    <p class="eyebrow">Data</p>
-    <h2 class="h-big">Your database</h2>
+    <p class="eyebrow">Settings</p>
+    <h2 class="h-big">Preferences &amp; data</h2>
     <p class="sub">${state.sessions.length} sessions · ${state.exercises.length} exercises · stored on this device only.</p>
 
     ${daysSinceExport === null || daysSinceExport >= 30 ? `<div class="hint" style="margin-top:16px">
@@ -904,6 +1156,19 @@ async function viewData() {
     <input type="file" id="file-json" accept=".json,application/json" hidden>
     <input type="file" id="file-csv" accept=".csv,text/csv,text/plain" hidden>
 
+    <h3 class="h-sec">Appearance</h3>
+    <div class="card card-pad">
+      <div class="field" style="margin-bottom:0">
+        <label for="p-theme">Theme</label>
+        <select class="input" id="p-theme" data-pref="theme">
+          ${THEMES.map((t) => `<option value="${t.id}"
+            ${state.settings.theme === t.id ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          The ${effectiveTheme() === 'dark' ? 'sun' : 'moon'} beside the wordmark flips it without coming here.</p>
+      </div>
+    </div>
+
     <h3 class="h-sec">Preferences</h3>
     <div class="card card-pad">
       <div class="field">
@@ -915,7 +1180,7 @@ async function viewData() {
       </div>
       <div class="field">
         <label for="p-wstep">Weight step</label>
-        <input class="input" id="p-wstep" data-pref="weightStep" inputmode="decimal" value="${state.settings.weightStep}">
+        ${optionSelectHtml('weightStep', 'p-wstep')}
       </div>
       <div class="field">
         <label for="p-rstep">Rep step</label>
@@ -923,18 +1188,22 @@ async function viewData() {
       </div>
       <div class="field">
         <label for="p-rest">Rest timer</label>
-        <select class="input" id="p-rest" data-pref="restTimerSeconds">
-          ${[60, 90, 120, 150, 180, 240, 300].map((v) => `<option value="${v}"
-            ${Number(state.settings.restTimerSeconds) === v ? 'selected' : ''}>${v / 60 >= 1 ? `${v / 60} min` : `${v}s`}</option>`).join('')}
-        </select>
+        ${optionSelectHtml('restTimerSeconds', 'p-rest')}
       </div>
-      <div class="field">
+      <div class="field" style="margin-bottom:0">
         <label for="p-auto">Start rest timer automatically</label>
         <select class="input" id="p-auto" data-pref="restTimerAuto">
           <option value="yes" ${state.settings.restTimerAuto ? 'selected' : ''}>Yes, when I mark a set done</option>
           <option value="no" ${!state.settings.restTimerAuto ? 'selected' : ''}>No, never</option>
         </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          Both dropdowns above end in “Edit this list…”, where you can add or
+          remove the values they offer.</p>
       </div>
+    </div>
+
+    <h3 class="h-sec">Plot settings</h3>
+    <div class="card card-pad">
       <div class="field" ${trendMode.id === 'off' ? 'style="margin-bottom:0"' : ''}>
         <label for="p-trend">Volume trend line</label>
         <select class="input" id="p-trend" data-pref="volumeTrend">
@@ -950,6 +1219,10 @@ async function viewData() {
           ${S.MA_PERIODS.map((n) => `<option value="${n}"
             ${trendPeriod === n ? 'selected' : ''}>${n} sessions</option>`).join('')}
         </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          ${esc(trendMode.id === 'ema'
+            ? `Each session weighted 2/(${trendPeriod}+1), seeded with the plain average of the first ${trendPeriod}.`
+            : `The mean of every ${trendPeriod} consecutive sessions. Nothing is drawn until there are ${trendPeriod}.`)}</p>
       </div>`}
     </div>
 
@@ -980,7 +1253,7 @@ function viewExercises() {
   for (const s of state.sessions) {
     for (const e of s.entries || []) counts.set(e.exerciseId, (counts.get(e.exerciseId) || 0) + 1);
   }
-  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/data">Back</a>`;
+  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/settings">Back</a>`;
   $('#view').innerHTML = `
     <p class="eyebrow">Exercises</p>
     <h2 class="h-big">${state.exercises.length} in your list</h2>
@@ -1063,7 +1336,7 @@ async function saveRoutine(r) {
 }
 
 function viewRoutines() {
-  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/data">Back</a>`;
+  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/settings">Back</a>`;
   const rows = state.routines.map((r) => `
     <button class="row" data-act="open-routine" data-id="${esc(r.id)}">
       <span class="grow">
@@ -1609,6 +1882,13 @@ document.addEventListener('click', async (e) => {
       infoSheet();
       break;
 
+    case 'theme':
+      // An explicit tap leaves "match system" behind — you have just said which
+      // one you want, and following the system would undo it at sunset.
+      setTheme(effectiveTheme() === 'dark' ? 'light' : 'dark');
+      if (currentTab() === 'settings') render();
+      break;
+
     case 'dismiss-hint':
       localStorage.setItem('flexloop.a2hs', '1');
       btn.closest('.hint').remove();
@@ -1658,18 +1938,32 @@ $('#view').addEventListener('change', async (e) => {
     patchSummary(c.session);
   } else if (el.dataset.pref) {
     const key = el.dataset.pref;
+    // "Edit this list…" is a door, not a value: put the select back where it
+    // was and open the editor. Committing it would store the sentinel.
+    if (el.dataset.options && el.value === OPTION_EDIT) {
+      const spec = OPTION_LISTS[key];
+      const cur = spec.clean(state.settings[key]);
+      el.value = cur == null ? String(spec.defaults[0]) : String(cur);
+      editOptionsSheet(key);
+      return;
+    }
     let v = el.value;
     if (key === 'restTimerAuto') v = v === 'yes';
-    else if (key === 'weightStep') v = Math.max(0.25, parseFloat(v.replace(',', '.')) || 2.5);
-    else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
-    else if (key === 'restTimerSeconds') v = parseInt(v, 10) || 120;
+    else if (key === 'weightStep' || key === 'restTimerSeconds') {
+      const n = OPTION_LISTS[key].clean(v);
+      v = n == null ? state.settings[key] : n;
+    } else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
     else if (key === 'volumeTrend') v = S.maMode(v).id;
     else if (key === 'volumeTrendPeriod') v = S.maPeriod(v);
+    else if (key === 'theme') v = THEMES.some((t) => t.id === v) ? v : 'dark';
     state.settings[key] = v;
     db.saveSettings(state.settings);
+    if (key === 'theme') applyTheme();
     toast('Preference saved');
-    // Turning the trend off hides its length select, so this view has to redraw.
-    if (key === 'unit' || key === 'volumeTrend') render();
+    // Some of these change what the rest of the screen says: the unit relabels
+    // the weight steps, turning the trend off hides its length select, and the
+    // theme decides which glyph the note beside it names.
+    if (key === 'unit' || key === 'theme' || key === 'volumeTrend' || key === 'volumeTrendPeriod') render();
   }
 });
 
@@ -1700,23 +1994,94 @@ $('#view').addEventListener('pointermove', (e) => {
 ['pointerup', 'pointercancel', 'scroll'].forEach((ev) =>
   $('#view').addEventListener(ev, () => { clearTimeout(pressTimer); pressOrigin = null; }, { passive: true }));
 
-/** Reference for gestures the UI doesn't otherwise explain — long-press above all. */
+/**
+ * The topbar (i). One entry per tab: it explains the screen you are looking
+ * at, since a single sheet covering the whole app would be four screens of
+ * text to find one paragraph in.
+ *
+ * Every string is escaped on the way out, so these are plain text only.
+ */
+const INFO = {
+  log: {
+    title: 'the Log',
+    sub: 'The +/− steppers and the checkmark cover adding and finishing a set. Everything else lives behind a long-press.',
+    items: [
+      ['Long-press a set row',
+       "Opens a menu to mark it a warmup, duplicate it, or delete it. There's no swipe or edit button — deleting a set is always this."],
+      ['Tap the weight or reps number',
+       'Type a value directly instead of stepping to it. One tap of − or + moves it by the weight step and rep step set in Settings.'],
+      ['Tap ••• on an exercise card',
+       'Mark every set in it done at once, move it up or down, or remove it from this session — the exercise itself is untouched.'],
+      ["Tap an exercise's name",
+       'Jumps to its chart on Progress → Per exercise.'],
+      ['The dim line under each name',
+       'The ghost: what you lifted last time, so you never have to go looking for it. New sets prefill from it too.'],
+    ],
+  },
+
+  history: {
+    title: 'History',
+    sub: 'Every finished session, newest first, grouped by month with that month’s session count and total volume.',
+    items: [
+      ['Tap any session',
+       'Opens it for editing. Sets, notes and exercises can be changed long after the fact, and every chart follows.'],
+      ['Deleting a session',
+       'Is done from inside it, at the bottom. It disappears from history, from your records, and from every chart.'],
+      ['Imported sessions',
+       'Carry an “imported” mark at the top. A Strongify CSV becomes one session per calendar day, with the routine name kept as the note.'],
+      ['Volume, per month',
+       'Σ weight × reps over completed working sets. Warmups never count.'],
+    ],
+  },
+
+  progress: {
+    title: 'Progress',
+    sub: 'Overview is your whole training week by week. Per exercise is one lift at a time, over the window you pick.',
+    items: [
+      ['Estimated 1RM',
+       'Epley: weight × (1 + reps / 30), taking the best set of each session. An estimate, and optimistic above about 12 reps — which is why the formula is printed on the chart.'],
+      ['Volume',
+       'Σ weight × reps across completed sets. Warmups are excluded everywhere, including from personal records.'],
+      ['The trend line over Volume per session',
+       'A moving average — simple or exponential, over as many sessions as you choose in Settings → Plot settings. It reads NEEDS n+ until there are that many sessions.'],
+      ['Tap a point or a bar',
+       'Reads out its value. The charts of one exercise share a selection, so tapping a session marks it in all of them.'],
+      ['1M / 3M / 6M / 1Y / All',
+       'Cuts the window. Averages and records are computed over the whole history first, so the window moves the view, not the numbers.'],
+      ['Going stale',
+       'Longest since you last trained it. Past three weeks it turns red.'],
+    ],
+  },
+
+  settings: {
+    title: 'Settings',
+    sub: 'Preferences, the two editable dropdowns, how the trend line is computed, and your backups.',
+    items: [
+      ['Editable dropdowns',
+       'Rest timer and Weight step end in “Edit this list…”. That opens an editor where you add a value of your own — 75 seconds, a 3.75 kg plate pair — or remove ones you never pick. Remove the value in use and the setting moves to the nearest one left; Reset to defaults puts the original list back.'],
+      ['Weight step and rep step',
+       'What one tap of − or + moves a set by while logging. The weight step follows the unit, so switching kg → lb relabels the list rather than converting it.'],
+      ['Moving averages',
+       'Simple averages the last n sessions equally. Exponential weights recent sessions more heavily, with k = 2/(n+1), and is seeded with the simple average of its first window — so both kinds start at the same session and the same number. Nothing is drawn until n sessions exist, and the average always runs over the full history before being cut to the window on screen.'],
+      ['Export, regularly',
+       'This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after 30 days.'],
+      ['Import',
+       'Import backup replaces everything on the device, and asks first. Import Strongify CSV merges instead, deleting nothing.'],
+      ['Theme',
+       'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
+    ],
+  },
+};
+
 function infoSheet() {
+  const info = INFO[currentTab()] || INFO.log;
   openSheet(`
-    <h2>How to edit a set</h2>
-    <p class="sub">The +/− steppers and the checkmark cover adding and finishing a
-      set. Everything else lives behind a long-press.</p>
+    <h2>About ${esc(info.title)}</h2>
+    <p class="sub">${esc(info.sub)}</p>
     <div class="info-list">
-      <div class="info-item"><span class="t">Long-press a set row</span>
-        <span class="s">Opens a menu to mark it a warmup, duplicate it, or delete it.
-          There's no swipe or edit button — deleting a set is always this.</span></div>
-      <div class="info-item"><span class="t">Tap the weight or reps number</span>
-        <span class="s">Type a value directly instead of stepping to it.</span></div>
-      <div class="info-item"><span class="t">Tap ••• on an exercise card</span>
-        <span class="s">Mark every set in it done at once, move it up or down, or
-          remove it from this session — the exercise itself is untouched.</span></div>
-      <div class="info-item"><span class="t">Tap an exercise's name</span>
-        <span class="s">Jumps to its chart on Progress → Per exercise.</span></div>
+      ${info.items.map(([t, d]) => `<div class="info-item">
+        <span class="t">${esc(t)}</span>
+        <span class="s">${esc(d)}</span></div>`).join('')}
     </div>
     <button class="btn btn-block" style="margin-top:16px" data-close>Got it</button>`);
 }
@@ -1843,6 +2208,9 @@ async function registerSW() {
    ========================================================================== */
 
 async function boot() {
+  // index.html already set the palette from localStorage before first paint;
+  // this re-runs it against the parsed settings and dresses the toggle button.
+  applyTheme();
   try {
     await db.openDB();
   } catch (err) {
