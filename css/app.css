@@ -51,12 +51,21 @@
 
   --pad: 16px;
   --topbar-h: 52px;
-  --tabs-h: 58px;
+  --tabs-h: 52px;
+  --tab-row-min: 44px;
 
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
+
+  /* Launched from the Home Screen the bottom inset becomes 34px, and stacking a
+     fixed row on top of it made the bar half again as tall as it is in the
+     browser. The home indicator strip is already unusable, so let it pay for
+     part of the row rather than sit underneath it — down to a floor that keeps
+     the tap target honest. --tabs-total adds the 1px border the bar draws. */
+  --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--safe-b)));
+  --tabs-total: calc(var(--tab-row) + var(--safe-b) + 1px);
 }
 
 /* Light theme. Same names, other end of the scale. The accent darkens to
@@ -140,7 +149,7 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
 
 .topbar-inner {
   height: var(--topbar-h);
-  padding: 0 calc(var(--pad) + var(--safe-l)) 0 calc(var(--pad) + var(--safe-r));
+  padding: 0 calc(var(--pad) + var(--safe-r)) 0 calc(var(--pad) + var(--safe-l));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -187,7 +196,7 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
 
 .view {
   position: absolute;
-  inset: calc(var(--topbar-h) + var(--safe-t)) 0 calc(var(--tabs-h) + var(--safe-b)) 0;
+  inset: calc(var(--topbar-h) + var(--safe-t)) 0 var(--tabs-total) 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
@@ -213,7 +222,7 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 
 .tab {
-  height: var(--tabs-h);
+  height: var(--tab-row);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -910,7 +919,7 @@ select.input {
 .rest {
   position: fixed;
   left: 0; right: 0;
-  bottom: calc(var(--tabs-h) + var(--safe-b));
+  bottom: var(--tabs-total);
   z-index: 45;
   background: var(--slab-2);
   border-top: 1px solid var(--edge);

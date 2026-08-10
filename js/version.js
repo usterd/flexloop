@@ -16,10 +16,19 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v14';
+self.APP_VERSION = 'flexloop-v15';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v15',
+    items: [
+      ['A shorter tab bar on the Home Screen',
+       'Installed, the tab bar stacked its full height on top of the home indicator. The indicator now pays for part of it — about 14px of screen back.'],
+      ['The Log stays where you left it',
+       'Adding a set no longer rebuilds the screen, so it stops jumping to the top. Nor does changing a preference, a Progress window, or deleting a set.'],
+    ],
+  },
   {
     v: 'flexloop-v14',
     items: [
