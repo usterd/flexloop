@@ -114,24 +114,6 @@ function setTheme(id) {
   applyTheme();
 }
 
-/** Compact shortens the tab row, its icons and its gutter. All of it is CSS. */
-function applyTabDensity() {
-  document.documentElement.dataset.tabDensity =
-    state.settings.tabBarDensity === 'compact' ? 'compact' : 'comfortable';
-}
-
-/**
- * The note under the Tab bar select. It reads the bar back off the page rather
- * than recomputing the CSS, because the whole point of the setting is the
- * height you actually get — which depends on a safe-area inset we cannot know.
- */
-function tabBarNote() {
-  const tabs = $('.tabs');
-  const h = tabs ? Math.round(tabs.getBoundingClientRect().height) : 0;
-  return 'Compact trims the row, its icons and the strip beneath them.'
-    + (h ? ` The bar is ${h}px tall right now.` : '');
-}
-
 // Following the system means following it as it changes, not only at launch.
 lightMedia.addEventListener('change', () => {
   if (state.settings.theme === 'auto') applyTheme();
@@ -1425,14 +1407,6 @@ async function viewSettings() {
         <p class="meta" style="text-align:left;padding:6px 0 0">
           The ${effectiveTheme() === 'dark' ? 'sun' : 'moon'} beside the wordmark flips it without coming here.</p>
       </div>
-      <div class="field" style="margin-bottom:0">
-        <label for="p-tabs">Tab bar</label>
-        <select class="input" id="p-tabs" data-pref="tabBarDensity">
-          <option value="comfortable" ${state.settings.tabBarDensity !== 'compact' ? 'selected' : ''}>Comfortable</option>
-          <option value="compact" ${state.settings.tabBarDensity === 'compact' ? 'selected' : ''}>Compact</option>
-        </select>
-        <p class="meta" style="text-align:left;padding:6px 0 0" id="tabs-h-note">${esc(tabBarNote())}</p>
-      </div>
     </div>
 
     <h3 class="h-sec">Preferences</h3>
@@ -2261,18 +2235,9 @@ $('#view').addEventListener('change', async (e) => {
     else if (key === 'volumeTrend') v = S.maMode(v).id;
     else if (key === 'boostMetric') v = S.boostMetric(v).id;
     else if (key === 'theme') v = THEMES.some((t) => t.id === v) ? v : 'dark';
-    else if (key === 'tabBarDensity') v = v === 'compact' ? 'compact' : 'comfortable';
     state.settings[key] = v;
     db.saveSettings(state.settings);
     if (key === 'theme') applyTheme();
-    // Pure CSS, so no render() below: the bar resizes without throwing away
-    // where you were on this screen. Its note quotes a measurement, so that one
-    // line is patched by hand.
-    if (key === 'tabBarDensity') {
-      applyTabDensity();
-      const note = $('#tabs-h-note');
-      if (note) note.textContent = tabBarNote();
-    }
     toast('Preference saved');
     // Some of these change what the rest of the screen says: the unit relabels
     // the weight steps, turning the trend off hides its length select, the
@@ -2627,7 +2592,6 @@ async function boot() {
   // index.html already set the palette from localStorage before first paint;
   // this re-runs it against the parsed settings and dresses the toggle button.
   applyTheme();
-  applyTabDensity();
   try {
     await db.openDB();
   } catch (err) {

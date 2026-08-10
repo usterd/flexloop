@@ -16,10 +16,17 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v18';
+self.APP_VERSION = 'flexloop-v19';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v19',
+    items: [
+      ['The tab bar setting is gone again',
+       'Comfortable and Compact came in to work around the short viewport. That turned out to be the Home Screen icon, so the choice was solving nothing. Appearance is back to Theme alone.'],
+    ],
+  },
   {
     v: 'flexloop-v18',
     items: [

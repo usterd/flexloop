@@ -101,18 +101,6 @@
   color-scheme: light;
 }
 
-/* Compact tab bar. Same geometry as the default, smaller numbers: the row gives
-   up 4px, the indicator gutter 6px, the icon 2px. Installed that is
-   38 + 8 + 1 = 47px against comfortable's 57px. In the browser, where there is
-   no inset to overlap, the two land on 47px and 53px. */
-:root[data-tab-density="compact"] {
-  --tabs-h: 46px;
-  --tab-row-min: 38px;
-  --home-gutter: 8px;
-}
-:root[data-tab-density="compact"] .tab { gap: 1px; font-size: 9.5px; }
-:root[data-tab-density="compact"] .tab svg { width: 20px; height: 20px; }
-
 * { box-sizing: border-box; }
 
 /* Class-level `display` beats the UA's [hidden] rule, so make it explicit. */

@@ -128,8 +128,6 @@ export const DEFAULT_TREND_PERIODS = [3, 5, 8, 10, 12];
 const DEFAULT_SETTINGS = {
   unit: 'kg',              // display unit for every weight
   theme: 'dark',           // 'dark' | 'light' | 'auto' (follow the system)
-  // Tab bar height: 'comfortable' | 'compact'. See --tab-row in app.css.
-  tabBarDensity: 'comfortable',
   restTimerSeconds: 120,
   restTimerOptions: DEFAULT_REST_OPTIONS,
   restTimerAuto: true,     // start the timer when a set is marked done
