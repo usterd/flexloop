@@ -185,6 +185,8 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
 }
 .wordmark span { color: var(--signal); }
 
+.wordmark-link { text-decoration: none; color: inherit; }
+
 /* Small round glyph button — the info trigger today, reusable wherever the
    topbar needs an icon-only action that isn't route-specific. */
 .icon-btn {

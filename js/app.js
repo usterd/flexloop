@@ -2412,6 +2412,12 @@ document.addEventListener('click', async (e) => {
       if (currentTab() === 'settings') render();
       break;
 
+    case 'refresh':
+      await reload();
+      render();
+      toast('Refreshed');
+      break;
+
     case 'dismiss-hint':
       localStorage.setItem('flexloop.a2hs', '1');
       btn.closest('.hint').remove();
