@@ -73,7 +73,13 @@
      about 15px. The floor can drop to 42px because the tap target is no longer
      the row: .tab carries the gutter as padding, so the anchor is 68px tall
      while the icon and label centre in the row above it. Installed that is
-     43 + 25 + 1 = 69px. --tabs-total adds the 1px border the bar draws. */
+     43 + 25 + 1 = 69px. --tabs-total adds the 1px border the bar draws.
+
+     Since v22 the app no longer asks iOS for a full-screen view in either
+     theme (see the status-bar meta in index.html), so on iOS the inset is 0
+     and this resolves to the plain 52 + 0 + 1 = 53px. The arithmetic above is
+     still live wherever an inset is genuinely non-zero: Safari as a browser,
+     landscape, and Android, where Chrome does paint behind the nav bar. */
   --tab-pad-b:  min(var(--safe-b), var(--home-gutter));
   --tab-paid:   max(0px, calc(var(--safe-b) - var(--tab-pad-b)));
   --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--tab-paid)));

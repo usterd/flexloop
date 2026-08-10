@@ -99,7 +99,7 @@ function applyTheme() {
   // iOS only reads this one while parsing the head — index.html sets it there
   // too. Kept in step here so the next launch starts from the right value.
   const bar = $('#ios-status-bar');
-  if (bar) bar.setAttribute('content', t === 'light' ? 'default' : 'black-translucent');
+  if (bar) bar.setAttribute('content', t === 'light' ? 'default' : 'black');
   const btn = $('#theme-btn');
   if (btn) {
     // The button shows the theme you would get, not the one you are in.

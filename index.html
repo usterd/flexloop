@@ -15,7 +15,7 @@
      the second is the standardised replacement. Ship both. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" id="ios-status-bar">
+<meta name="apple-mobile-web-app-status-bar-style" content="black" id="ios-status-bar">
 <meta name="apple-mobile-web-app-title" content="flexloop">
 <meta name="format-detection" content="telephone=no">
 
@@ -34,11 +34,15 @@
     document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
     if (t === 'light') {
       document.querySelector('#theme-color').setAttribute('content', '#F6F7F9');
-      // black-translucent draws the clock and battery in white, which on a
-      // light page is a white-on-white status bar. iOS reads this meta while
-      // parsing the head, so it has to be rewritten here rather than later
-      // from app.js — and a theme switched mid-session only takes effect at
-      // the next launch.
+      // Neither theme asks iOS for a full-screen web view. black-translucent
+      // is the only value that grants one, and all it buys is the strip behind
+      // the home indicator — which --tab-pad-b then has to pad straight back
+      // out. It costs bar height and returns nothing. That leaves only which
+      // opaque bar to reserve: black over a dark page, default over a light
+      // one, since black draws the clock and battery in white. iOS reads this
+      // meta while parsing the head, so it has to be rewritten here rather
+      // than later from app.js — and a theme switched mid-session only takes
+      // effect at the next launch.
       document.querySelector('#ios-status-bar').setAttribute('content', 'default');
     }
   } catch (e) { /* private mode: dark it is */ }

@@ -361,10 +361,14 @@ since there is nothing left to chart.
 - The theme defaults to **dark**, not to the system setting. *Match system* is one
   tap away for anyone who wants it, but a gym at 6am is not a place to be handed a
   white screen because the phone thinks it is daytime.
-- In light mode the iOS status bar style is switched from `black-translucent` to
-  `default`, because a translucent bar draws the clock in white and a light page
-  would leave it invisible. iOS reads that meta tag while parsing the head, so a
-  theme changed mid-session only reaches the status bar at the next launch.
+- Neither theme uses `black-translucent` for the iOS status bar: dark mode asks for
+  `black`, light mode for `default`. `black-translucent` is the only value that makes
+  the web view full-screen, and the one thing that buys is the strip behind the home
+  indicator — which the tab bar then has to pad straight back out, so it costs height
+  and returns nothing. Of the two opaque styles, `black` draws the clock in white and
+  would be invisible on a light page, hence the split. iOS reads that meta tag while
+  parsing the head, so a theme changed mid-session only reaches the status bar at the
+  next launch.
 
 ## Licence
 
