@@ -16,10 +16,19 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v17';
+self.APP_VERSION = 'flexloop-v18';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v18',
+    items: [
+      ['The band under the tab bar was the icon',
+       'The old Home Screen icon launched the app 59px shorter than the screen. Deleting it and adding it again fixed it. No code was at fault, so none changed.'],
+      ['The Display readout is gone',
+       'It did its job: it showed the app ended 59px above the bottom of the screen, which no tab bar could explain. Settings is back to normal.'],
+    ],
+  },
   {
     v: 'flexloop-v17',
     items: [
