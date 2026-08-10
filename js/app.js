@@ -1659,6 +1659,9 @@ async function viewSettings() {
         ${(est.usage / 1048576).toFixed(2)} MB used${est.quota ? ` of ${(est.quota / 1048576).toFixed(0)} MB available` : ''}</p>` : ''}
     </div>
 
+    <h3 class="h-sec">App</h3>
+    <button class="btn btn-block" data-act="reload-app">Reload app</button>
+
     <hr class="sep">
     ${hasDemoData() ? `
       <button class="btn btn-danger btn-block btn-sm" style="margin-bottom:10px"
@@ -2412,10 +2415,8 @@ document.addEventListener('click', async (e) => {
       if (currentTab() === 'settings') render();
       break;
 
-    case 'refresh':
-      await reload();
-      render();
-      toast('Refreshed');
+    case 'reload-app':
+      location.reload();
       break;
 
     case 'dismiss-hint':
