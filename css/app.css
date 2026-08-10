@@ -53,7 +53,7 @@
   --topbar-h: 52px;
   --tabs-h: 52px;          /* row height when there is no bottom inset */
   --tab-row-min: 42px;     /* floor for the visual row once the inset pays in */
-  --home-gutter: 14px;     /* strip of the inset left clear under the row */
+  --home-gutter: 25px;     /* strip of the inset left clear under the row */
 
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -64,12 +64,16 @@
      attempt at this asked the indicator to pay for part of the row, but the
      44px floor always won — 52 - 34 never got near it — so the whole inset
      went on stacking underneath: a 79px bar against the browser's 53px, 34px
-     of it empty. The indicator only needs a thin gutter to sit in, so the row
-     overlaps the rest of the strip rather than perching on top of it. The
-     floor can drop to 42px because the tap target is no longer the row: .tab
-     carries the gutter as padding, so the anchor stays ~56px tall while the
-     icon and label centre in the row above it. Installed that is 42 + 14 + 1 =
-     57px. --tabs-total adds the 1px border the bar draws. */
+     of it empty. So the row overlaps the strip rather than perching on top of
+     it, keeping back only --home-gutter.
+
+     That gutter has to clear the indicator, not merely avoid the screen edge.
+     The pill is about 5px tall sitting about 8px up, so its top edge is ~13px
+     from the bottom; at 25px the labels bottom out around 29px and clear it by
+     about 15px. The floor can drop to 42px because the tap target is no longer
+     the row: .tab carries the gutter as padding, so the anchor is 68px tall
+     while the icon and label centre in the row above it. Installed that is
+     43 + 25 + 1 = 69px. --tabs-total adds the 1px border the bar draws. */
   --tab-pad-b:  min(var(--safe-b), var(--home-gutter));
   --tab-paid:   max(0px, calc(var(--safe-b) - var(--tab-pad-b)));
   --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--tab-paid)));

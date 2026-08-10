@@ -16,10 +16,17 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v19';
+self.APP_VERSION = 'flexloop-v20';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v20',
+    items: [
+      ['Room above the home indicator',
+       'The tab labels ended about 4px short of the indicator, near enough to touch it. They now clear it by about 15px, which costs the bar 12px of height.'],
+    ],
+  },
   {
     v: 'flexloop-v19',
     items: [
