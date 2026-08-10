@@ -276,6 +276,21 @@ function currentTab() {
   return 'log';
 }
 
+/**
+ * What counts as "the same screen" for the purpose of keeping the scroll
+ * position. Progress holds its sub-tab and its exercise in state rather than in
+ * the hash, so switching either of those is a different screen and belongs at
+ * the top; changing a preference or adding a set is not.
+ */
+function screenKey() {
+  const h = location.hash;
+  return h.startsWith('#/progress')
+    ? `${h}|${state.progressTab}|${state.progressEx || ''}`
+    : h;
+}
+
+let renderedKey = null;
+
 async function render() {
   if (!location.hash || location.hash === '#') { location.replace('#/log'); return; }
   // The Data tab became Settings. Old bookmarks, and the Home Screen icon of
@@ -284,8 +299,12 @@ async function render() {
   const hash = location.hash;
   const hit = routes.find(([re]) => re.test(hash));
   const view = $('#view');
+  // Every view rebuilds #view from a string, which drops the scroll position.
+  // Arriving somewhere new should start at the top; re-rendering the screen you
+  // are already on — a new set, a changed preference — should not move you.
+  const key = screenKey();
+  const keepScroll = key === renderedKey ? view.scrollTop : 0;
   historyCache.clear();
-  view.scrollTop = 0;
   $('#topbar-action').innerHTML = '';
   if (hit) {
     const m = hash.match(hit[0]);
@@ -295,6 +314,10 @@ async function render() {
       <h3>Nothing here</h3><p>That screen doesn't exist.</p>
       <a class="btn" href="#/log">Go to Log</a></div>`;
   }
+  renderedKey = key;
+  // After the await, so the new markup is in place; a taller offset than the
+  // fresh content simply clamps.
+  view.scrollTop = keepScroll;
   const tab = currentTab();
   $$('.tab').forEach((t) => {
     if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page');
@@ -1889,11 +1912,22 @@ document.addEventListener('click', async (e) => {
       break;
 
     case 'add-set':
-    case 'add-warmup':
+    case 'add-warmup': {
       if (!c.entry) return;
+      const wasEmpty = c.entry.sets.length === 0;
       await addSet(c.session, c.entry, act === 'add-warmup');
-      render();
+      // Sets are always appended, so every existing data-set index still points
+      // where it did and the row can go in beside them — no full render, which
+      // would flicker the card and recompute every session's history.
+      const list = $('.sets', c.entryEl);
+      if (!list) { render(); break; }
+      const si = c.entry.sets.length - 1;
+      if (wasEmpty) list.insertAdjacentHTML('beforebegin', setHeadHtml());
+      list.insertAdjacentHTML('beforeend', setRowHtml(c.entry, c.entry.sets[si], si));
+      patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
       break;
+    }
 
     case 'step': {
       if (!c.set) return;
