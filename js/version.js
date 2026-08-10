@@ -16,10 +16,19 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v20';
+self.APP_VERSION = 'flexloop-v21';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v21',
+    items: [
+      ['Sheets stop a quarter down the screen',
+       'A long one used to reach the status bar, leaving nowhere to tap to get out. There is always a quarter of backdrop above it now.'],
+      ['The grab handle works',
+       'Drag it down to throw the sheet away, or tap it. It has looked draggable since the first version and did nothing at all until now.'],
+    ],
+  },
   {
     v: 'flexloop-v20',
     items: [
