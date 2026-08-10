@@ -16,10 +16,17 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v21';
+self.APP_VERSION = 'flexloop-v22';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v22',
+    items: [
+      ['A shorter tab bar in dark mode',
+       'Dark mode asked iOS for the strip behind the home indicator, then padded it back out. It no longer asks: 69px of bar down to 53px, for an opaque status bar.'],
+    ],
+  },
   {
     v: 'flexloop-v21',
     items: [
