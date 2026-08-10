@@ -1660,7 +1660,14 @@ async function viewSettings() {
     </div>
 
     <h3 class="h-sec">App</h3>
-    <button class="btn btn-block" data-act="reload-app">Reload app</button>
+    <div class="btn-row">
+      <button class="btn" data-act="reload-app">Reload app</button>
+      <button class="btn" data-act="check-update">Check for update</button>
+    </div>
+    <p class="meta" style="text-align:left;padding:6px 0 0">
+      Reload app reopens the page as it is right now. Check for update asks the
+      server for a newer version; if one exists it installs quietly in the
+      background and offers a "Reload" toast to switch to it.</p>
 
     <hr class="sep">
     ${hasDemoData() ? `
@@ -2418,6 +2425,24 @@ document.addEventListener('click', async (e) => {
     case 'reload-app':
       location.reload();
       break;
+
+    case 'check-update': {
+      if (!('serviceWorker' in navigator)) { toast('Service worker not supported'); break; }
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) { toast('Service worker not registered'); break; }
+      try {
+        await reg.update();
+      } catch (err) {
+        toast('Could not check for updates');
+        break;
+      }
+      // If a new worker isn't installing/waiting, the byte-for-byte check
+      // found nothing new. Otherwise the updatefound/controllerchange
+      // listeners in registerSW() take it from here and surface their own
+      // "Update ready" toast once the new worker has taken control.
+      if (!reg.installing && !reg.waiting) toast(`Already on the latest version (${VERSION_SHORT})`);
+      break;
+    }
 
     case 'dismiss-hint':
       localStorage.setItem('flexloop.a2hs', '1');
