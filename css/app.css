@@ -51,21 +51,29 @@
 
   --pad: 16px;
   --topbar-h: 52px;
-  --tabs-h: 52px;
-  --tab-row-min: 44px;
+  --tabs-h: 52px;          /* row height when there is no bottom inset */
+  --tab-row-min: 42px;     /* floor for the visual row once the inset pays in */
+  --home-gutter: 14px;     /* strip of the inset left clear under the row */
 
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
 
-  /* Launched from the Home Screen the bottom inset becomes 34px, and stacking a
-     fixed row on top of it made the bar half again as tall as it is in the
-     browser. The home indicator strip is already unusable, so let it pay for
-     part of the row rather than sit underneath it — down to a floor that keeps
-     the tap target honest. --tabs-total adds the 1px border the bar draws. */
-  --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--safe-b)));
-  --tabs-total: calc(var(--tab-row) + var(--safe-b) + 1px);
+  /* Launched from the Home Screen the bottom inset becomes 34px. The previous
+     attempt at this asked the indicator to pay for part of the row, but the
+     44px floor always won — 52 - 34 never got near it — so the whole inset
+     went on stacking underneath: a 79px bar against the browser's 53px, 34px
+     of it empty. The indicator only needs a thin gutter to sit in, so the row
+     overlaps the rest of the strip rather than perching on top of it. The
+     floor can drop to 42px because the tap target is no longer the row: .tab
+     carries the gutter as padding, so the anchor stays ~56px tall while the
+     icon and label centre in the row above it. Installed that is 42 + 14 + 1 =
+     57px. --tabs-total adds the 1px border the bar draws. */
+  --tab-pad-b:  min(var(--safe-b), var(--home-gutter));
+  --tab-paid:   max(0px, calc(var(--safe-b) - var(--tab-pad-b)));
+  --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--tab-paid)));
+  --tabs-total: calc(var(--tab-row) + var(--tab-pad-b) + 1px);
 }
 
 /* Light theme. Same names, other end of the scale. The accent darkens to
@@ -214,7 +222,8 @@ body.has-rest .view { padding-bottom: 96px; }
   z-index: 40;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  padding-bottom: var(--safe-b);
+  /* No padding here: the gutter lives on .tab instead, so a tap that lands in
+     the home indicator strip still hits a tab rather than dead bar. */
   background: color-mix(in srgb, var(--ink) 92%, transparent);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
@@ -222,12 +231,13 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 
 .tab {
-  height: var(--tab-row);
+  height: calc(var(--tab-row) + var(--tab-pad-b));
+  padding-bottom: var(--tab-pad-b);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   text-decoration: none;
   color: var(--dim);
   font-size: 10px;
@@ -235,6 +245,8 @@ body.has-rest .view { padding-bottom: 96px; }
   letter-spacing: 0.02em;
   position: relative;
 }
+/* Body line-height is 1.45, which the shorter row cannot spare. */
+.tab span { line-height: 1.15; }
 .tab svg {
   width: 22px; height: 22px;
   fill: none; stroke: currentColor;
