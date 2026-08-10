@@ -16,10 +16,19 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v16';
+self.APP_VERSION = 'flexloop-v17';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v17',
+    items: [
+      ['A Compact tab bar',
+       'Settings → Appearance → Tab bar. Compact trims the row, its icons and the strip beneath them: 57px down to 47px on the Home Screen.'],
+      ['A Display readout, for now',
+       'Settings prints what the screen reports, and can draw a line on the edge of the app. It is here to find the black band under the tab bar, then it goes.'],
+    ],
+  },
   {
     v: 'flexloop-v16',
     items: [

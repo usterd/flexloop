@@ -114,6 +114,24 @@ function setTheme(id) {
   applyTheme();
 }
 
+/** Compact shortens the tab row, its icons and its gutter. All of it is CSS. */
+function applyTabDensity() {
+  document.documentElement.dataset.tabDensity =
+    state.settings.tabBarDensity === 'compact' ? 'compact' : 'comfortable';
+}
+
+/**
+ * The note under the Tab bar select. It reads the bar back off the page rather
+ * than recomputing the CSS, because the whole point of the setting is the
+ * height you actually get — which depends on a safe-area inset we cannot know.
+ */
+function tabBarNote() {
+  const tabs = $('.tabs');
+  const h = tabs ? Math.round(tabs.getBoundingClientRect().height) : 0;
+  return 'Compact trims the row, its icons and the strip beneath them.'
+    + (h ? ` The bar is ${h}px tall right now.` : '');
+}
+
 // Following the system means following it as it changes, not only at launch.
 lightMedia.addEventListener('change', () => {
   if (state.settings.theme === 'auto') applyTheme();
@@ -1367,6 +1385,59 @@ function editOptionsSheet(id) {
    VIEW: SETTINGS  (was "Data" — same tab, same glyph)
    ========================================================================== */
 
+/* ---------------------------------------------------------------------------
+   TEMPORARY (v17) — the Display card, and the two helpers under it.
+
+   Installed on the Home Screen there is a black band below the tab bar that
+   three rounds of shortening the bar did not touch, and a screenshot cannot
+   settle why: .tabs paints in --ink over an --ink body, so the bar's own extent
+   is invisible. This prints what the device actually reports, and "Show
+   viewport edges" draws a magenta line on the very bottom of the app's
+   viewport. If that line sits on the physical bottom of the screen, the band is
+   inside the app; if it floats above the band, the web view is short and the
+   band is iOS. Delete this whole block, the vpdebug action and the
+   body.vp-debug rules in app.css once we know which.
+   ------------------------------------------------------------------------- */
+
+/** env() resolves in computed padding, which is the only way to read it in JS. */
+function safeInsets() {
+  const p = document.createElement('div');
+  p.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;'
+    + 'padding:env(safe-area-inset-top) env(safe-area-inset-right) '
+    + 'env(safe-area-inset-bottom) env(safe-area-inset-left);';
+  document.body.appendChild(p);
+  const cs = getComputedStyle(p);
+  const out = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft];
+  p.remove();
+  return out.map((v) => Math.round(parseFloat(v) || 0)).join(' / ');
+}
+
+function displayCardHtml() {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const vv = window.visualViewport;
+  const tabs = $('.tabs');
+  const rect = tabs ? tabs.getBoundingClientRect() : null;
+  // screen.height is CSS pixels too, so the difference is real dead space.
+  const unused = Math.round(screen.height - window.innerHeight);
+  const row = (k, v) => `<p class="meta" style="text-align:left;padding:0">${esc(k)}: ${esc(v)}</p>`;
+  return `
+    <h3 class="h-sec">Display</h3>
+    <div class="card card-pad">
+      <p class="sub" style="margin:0 0 6px">Temporary, while the band below the tab bar is tracked down.</p>
+      ${row('mode', standalone ? 'standalone (Home Screen)' : 'browser')}
+      ${row('viewport', `${window.innerWidth} × ${window.innerHeight}`)}
+      ${row('unused below viewport', `${unused}px`)}
+      ${row('screen', `${screen.width} × ${screen.height} @${window.devicePixelRatio}x`)}
+      ${row('visual viewport', vv ? `${Math.round(vv.width)} × ${Math.round(vv.height)}, offset ${Math.round(vv.offsetTop)}` : 'n/a')}
+      ${row('safe insets t/r/b/l', safeInsets())}
+      ${row('tab bar', rect ? `${Math.round(rect.height)}px` : 'n/a')}
+      ${row('bar to viewport bottom', rect ? `${Math.round(window.innerHeight - rect.bottom)}px` : 'n/a')}
+      ${row('version', VERSION_SHORT)}
+      <button class="btn btn-block btn-sm" style="margin-top:10px" data-act="vpdebug">
+        ${document.body.classList.contains('vp-debug') ? 'Hide' : 'Show'} viewport edges</button>
+    </div>`;
+}
+
 async function viewSettings() {
   const est = await db.storageEstimate();
   const persisted = navigator.storage && navigator.storage.persisted
@@ -1406,6 +1477,14 @@ async function viewSettings() {
         </select>
         <p class="meta" style="text-align:left;padding:6px 0 0">
           The ${effectiveTheme() === 'dark' ? 'sun' : 'moon'} beside the wordmark flips it without coming here.</p>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="p-tabs">Tab bar</label>
+        <select class="input" id="p-tabs" data-pref="tabBarDensity">
+          <option value="comfortable" ${state.settings.tabBarDensity !== 'compact' ? 'selected' : ''}>Comfortable</option>
+          <option value="compact" ${state.settings.tabBarDensity === 'compact' ? 'selected' : ''}>Compact</option>
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0" id="tabs-h-note">${esc(tabBarNote())}</p>
       </div>
     </div>
 
@@ -1491,6 +1570,8 @@ async function viewSettings() {
       ${est && est.usage != null ? `<p class="meta" style="text-align:left;padding:0">
         ${(est.usage / 1048576).toFixed(2)} MB used${est.quota ? ` of ${(est.quota / 1048576).toFixed(0)} MB available` : ''}</p>` : ''}
     </div>
+
+    ${displayCardHtml()}
 
     <hr class="sep">
     <button class="btn btn-danger btn-block" data-act="erase">Erase all data</button>
@@ -2156,6 +2237,12 @@ document.addEventListener('click', async (e) => {
       versionSheet();
       break;
 
+    // TEMPORARY (v17) — see the Display card above viewSettings().
+    case 'vpdebug':
+      document.body.classList.toggle('vp-debug');
+      render();
+      break;
+
     case 'theme':
       // An explicit tap leaves "match system" behind — you have just said which
       // one you want, and following the system would undo it at sunset.
@@ -2235,9 +2322,18 @@ $('#view').addEventListener('change', async (e) => {
     else if (key === 'volumeTrend') v = S.maMode(v).id;
     else if (key === 'boostMetric') v = S.boostMetric(v).id;
     else if (key === 'theme') v = THEMES.some((t) => t.id === v) ? v : 'dark';
+    else if (key === 'tabBarDensity') v = v === 'compact' ? 'compact' : 'comfortable';
     state.settings[key] = v;
     db.saveSettings(state.settings);
     if (key === 'theme') applyTheme();
+    // Pure CSS, so no render() below: the bar resizes without throwing away
+    // where you were on this screen. Its note quotes a measurement, so that one
+    // line is patched by hand.
+    if (key === 'tabBarDensity') {
+      applyTabDensity();
+      const note = $('#tabs-h-note');
+      if (note) note.textContent = tabBarNote();
+    }
     toast('Preference saved');
     // Some of these change what the rest of the screen says: the unit relabels
     // the weight steps, turning the trend off hides its length select, the
@@ -2592,6 +2688,7 @@ async function boot() {
   // index.html already set the palette from localStorage before first paint;
   // this re-runs it against the parsed settings and dresses the toggle button.
   applyTheme();
+  applyTabDensity();
   try {
     await db.openDB();
   } catch (err) {

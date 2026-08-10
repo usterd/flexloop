@@ -101,6 +101,32 @@
   color-scheme: light;
 }
 
+/* Compact tab bar. Same geometry as the default, smaller numbers: the row gives
+   up 4px, the indicator gutter 6px, the icon 2px. Installed that is
+   38 + 8 + 1 = 47px against comfortable's 57px. In the browser, where there is
+   no inset to overlap, the two land on 47px and 53px. */
+:root[data-tab-density="compact"] {
+  --tabs-h: 46px;
+  --tab-row-min: 38px;
+  --home-gutter: 8px;
+}
+:root[data-tab-density="compact"] .tab { gap: 1px; font-size: 9.5px; }
+:root[data-tab-density="compact"] .tab svg { width: 20px; height: 20px; }
+
+/* TEMPORARY (v17) — goes out with the Display card in Settings, once the black
+   band below the tab bar is diagnosed. Cyan marks the top of the tab bar,
+   magenta the bottom edge of the app's own viewport. Where magenta lands in a
+   photo of the phone is the whole answer: on the physical bottom of the screen
+   means the band is inside the app and ours to fix; floating above the band
+   means the web view is short and the band belongs to iOS. */
+body.vp-debug::before,
+body.vp-debug::after {
+  content: ""; position: fixed; left: 0; right: 0;
+  height: 3px; z-index: 999; pointer-events: none;
+}
+body.vp-debug::before { bottom: var(--tabs-total); background: #00E5FF; }
+body.vp-debug::after  { bottom: 0;                 background: #FF2D9B; }
+
 * { box-sizing: border-box; }
 
 /* Class-level `display` beats the UA's [hidden] rule, so make it explicit. */
