@@ -51,21 +51,33 @@
 
   --pad: 16px;
   --topbar-h: 52px;
-  --tabs-h: 52px;
-  --tab-row-min: 44px;
+  --tabs-h: 52px;          /* row height when there is no bottom inset */
+  --tab-row-min: 42px;     /* floor for the visual row once the inset pays in */
+  --home-gutter: 25px;     /* strip of the inset left clear under the row */
 
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
 
-  /* Launched from the Home Screen the bottom inset becomes 34px, and stacking a
-     fixed row on top of it made the bar half again as tall as it is in the
-     browser. The home indicator strip is already unusable, so let it pay for
-     part of the row rather than sit underneath it — down to a floor that keeps
-     the tap target honest. --tabs-total adds the 1px border the bar draws. */
-  --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--safe-b)));
-  --tabs-total: calc(var(--tab-row) + var(--safe-b) + 1px);
+  /* Launched from the Home Screen the bottom inset becomes 34px. The previous
+     attempt at this asked the indicator to pay for part of the row, but the
+     44px floor always won — 52 - 34 never got near it — so the whole inset
+     went on stacking underneath: a 79px bar against the browser's 53px, 34px
+     of it empty. So the row overlaps the strip rather than perching on top of
+     it, keeping back only --home-gutter.
+
+     That gutter has to clear the indicator, not merely avoid the screen edge.
+     The pill is about 5px tall sitting about 8px up, so its top edge is ~13px
+     from the bottom; at 25px the labels bottom out around 29px and clear it by
+     about 15px. The floor can drop to 42px because the tap target is no longer
+     the row: .tab carries the gutter as padding, so the anchor is 68px tall
+     while the icon and label centre in the row above it. Installed that is
+     43 + 25 + 1 = 69px. --tabs-total adds the 1px border the bar draws. */
+  --tab-pad-b:  min(var(--safe-b), var(--home-gutter));
+  --tab-paid:   max(0px, calc(var(--safe-b) - var(--tab-pad-b)));
+  --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--tab-paid)));
+  --tabs-total: calc(var(--tab-row) + var(--tab-pad-b) + 1px);
 }
 
 /* Light theme. Same names, other end of the scale. The accent darkens to
@@ -214,7 +226,8 @@ body.has-rest .view { padding-bottom: 96px; }
   z-index: 40;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  padding-bottom: var(--safe-b);
+  /* No padding here: the gutter lives on .tab instead, so a tap that lands in
+     the home indicator strip still hits a tab rather than dead bar. */
   background: color-mix(in srgb, var(--ink) 92%, transparent);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
@@ -222,12 +235,13 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 
 .tab {
-  height: var(--tab-row);
+  height: calc(var(--tab-row) + var(--tab-pad-b));
+  padding-bottom: var(--tab-pad-b);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   text-decoration: none;
   color: var(--dim);
   font-size: 10px;
@@ -235,6 +249,8 @@ body.has-rest .view { padding-bottom: 96px; }
   letter-spacing: 0.02em;
   position: relative;
 }
+/* Body line-height is 1.45, which the shorter row cannot spare. */
+.tab span { line-height: 1.15; }
 .tab svg {
   width: 22px; height: 22px;
   fill: none; stroke: currentColor;
@@ -1001,7 +1017,12 @@ select.input {
 .sheet-panel {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  max-height: 88vh;
+  /* A percentage, not vh, and of .sheet — which is inset:0 on the viewport, the
+     same box the scrim fills. The two then agree by construction; with vh the
+     panel can outgrow the scrim wherever the unit and the layout viewport
+     disagree. Three quarters leaves a full quarter of scrim to tap, which on
+     the Home Screen is the only way out of a sheet that fills its cap. */
+  max-height: 75%;
   display: flex;
   flex-direction: column;
   background: var(--slab);
@@ -1013,7 +1034,24 @@ select.input {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
-.sheet-grab { width: 38px; height: 4px; border-radius: 2px; background: var(--edge-hi); margin: 4px auto 14px; flex: none; }
+/* Drag-to-dismiss lives on this. touch-action:none is load-bearing — without it
+   iOS scrolls the panel instead of handing us the pointer stream. The ::after
+   grows a 4px pill into something aimable (~28x158px) without moving it; a
+   pseudo-element dispatches to its originating element, so it needs no wiring
+   of its own. The negative inset stays inside the 14px bottom margin so it
+   cannot sit over #sheet-body. */
+.sheet-grab {
+  width: 38px; height: 4px;
+  border-radius: 2px;
+  background: var(--edge-hi);
+  margin: 4px auto 14px;
+  flex: none;
+  position: relative;
+  touch-action: none;
+  cursor: grab;
+}
+.sheet-grab:active { cursor: grabbing; }
+.sheet-grab::after { content: ""; position: absolute; inset: -12px -60px; }
 .sheet h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
 .sheet .sub { margin-bottom: 14px; }
 @keyframes rise { from { transform: translateY(100%); } }

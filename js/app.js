@@ -139,7 +139,19 @@ function toast(message, actionLabel, onAction, ms = 3200) {
 
 /* ------------------------------------------------------------------ sheet */
 
-function openSheet(html, wire) {
+/**
+ * Runs when the sheet closes, however it closed. There are four ways out — the
+ * scrim, a [data-close] control, dragging the handle, and a sheet's own buttons
+ * — and confirmSheet/promptSheet have to settle their promise on all of them.
+ * Before this existed only their own buttons resolved, so a scrim tap left the
+ * await pending forever and the caller was abandoned mid-function: harmless
+ * where the next line is `if (!ok) return`, not harmless in doImportJson and
+ * doImportCsv, whose `finally { input.value = '' }` then never ran and left the
+ * file input unable to re-fire change for the same file.
+ */
+let sheetDismiss = null;
+
+function openSheet(html, wire, onDismiss) {
   const sheet = $('#sheet');
   const old = $('#sheet-body');
   // Sheets delegate their clicks from #sheet-body, and closing only emptied it,
@@ -149,19 +161,87 @@ function openSheet(html, wire) {
   const body = old.cloneNode(false);
   body.innerHTML = html;
   old.replaceWith(body);
+  sheetDismiss = onDismiss || null;
+  resetPanel();
   sheet.hidden = false;
   if (wire) wire(body);
 }
 function closeSheet() {
+  // Cleared before the call, not after: the callback is free to open a sheet of
+  // its own, and would otherwise have its dismiss handler wiped by this one.
+  const fn = sheetDismiss;
+  sheetDismiss = null;
   $('#sheet').hidden = true;
   $('#sheet-body').innerHTML = '';
+  resetPanel();
+  if (fn) fn();
+}
+/** Drop whatever the drag left inline, so the next sheet opens clean. */
+function resetPanel() {
+  const p = $('.sheet-panel');
+  p.style.transform = '';
+  p.style.transition = '';
+  p.style.animation = '';
 }
 $('#sheet').addEventListener('click', (e) => {
   if (e.target.hasAttribute('data-close') || e.target.closest('[data-close]')) closeSheet();
 });
 
+/* Drag the grab handle down to dismiss. The handle is static markup — openSheet
+   only ever swaps #sheet-body — so this is wired once, here. */
+(function wireSheetDrag() {
+  const grab = $('.sheet-grab');
+  const panel = $('.sheet-panel');
+  let startY = 0;
+  let startedAt = 0;
+  let dy = 0;
+  let dragging = false;
+
+  grab.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    startY = e.clientY;
+    startedAt = e.timeStamp;
+    dy = 0;
+    grab.setPointerCapture(e.pointerId);
+    // The open animation is a transform too, and would fight the inline one.
+    panel.style.animation = 'none';
+    panel.style.transition = 'none';
+  });
+
+  grab.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    dy = Math.max(0, e.clientY - startY);   // this sheet only travels downwards
+    panel.style.transform = `translateY(${dy}px)`;
+  });
+
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const elapsed = Math.max(1, e.timeStamp - startedAt);
+    const far = dy > Math.max(60, panel.getBoundingClientRect().height * 0.25);
+    const flick = dy > 12 && dy / elapsed > 0.5;
+    // A tap is a drag that went nowhere. The handle looks like a control, so
+    // let it behave as one rather than springing back to no effect.
+    const tap = dy < 4 && elapsed < 250;
+    panel.style.transition = 'transform .18s ease-out';
+    if (far || flick || tap) {
+      panel.style.transform = 'translateY(100%)';
+      // On a timer rather than transitionend: a dropped event would strand the
+      // sheet open and translated off-screen, with no way back to it.
+      setTimeout(closeSheet, 180);
+    } else {
+      panel.style.transform = 'translateY(0)';
+    }
+  };
+  grab.addEventListener('pointerup', end);
+  grab.addEventListener('pointercancel', end);
+})();
+
 function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
   return new Promise((resolve) => {
+    // Dismissing any other way — scrim, handle — leaves this false, which is
+    // the same answer Cancel gives.
+    let answer = false;
     openSheet(`
       <h2>${esc(title)}</h2>
       <p class="sub">${esc(body)}</p>
@@ -172,16 +252,20 @@ function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
       root.addEventListener('click', (e) => {
         const b = e.target.closest('[data-x]');
         if (!b) return;
+        // Record, then close. Resolving here as well would race the dismiss
+        // callback closeSheet fires, and the cancelled value would win.
+        answer = b.dataset.x === 'yes';
         closeSheet();
-        resolve(b.dataset.x === 'yes');
       });
-    });
+    }, () => resolve(answer));
   });
 }
 
 /** Resolves to the trimmed string, or null if cancelled or left empty. */
 function promptSheet({ title, body, label, value = '', placeholder = '', confirm = 'Save' }) {
   return new Promise((resolve) => {
+    // Dismissed any other way and nothing was entered: same as Cancel.
+    let answer = null;
     openSheet(`
       <h2>${esc(title)}</h2>
       ${body ? `<p class="sub">${esc(body)}</p>` : ''}
@@ -196,9 +280,11 @@ function promptSheet({ title, body, label, value = '', placeholder = '', confirm
       </div>`, (root) => {
       const input = $('#pr-in', root);
       const done = (ok) => {
+        // Read before closing: closeSheet empties #sheet-body and the input
+        // with it. Then close, and let the dismiss callback do the resolving.
         const v = input.value.trim();
+        answer = ok && v ? v : null;
         closeSheet();
-        resolve(ok && v ? v : null);
       };
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); });
       root.addEventListener('click', (e) => {
@@ -207,7 +293,7 @@ function promptSheet({ title, body, label, value = '', placeholder = '', confirm
       });
       // iOS only raises the keyboard for a focus inside the current task.
       setTimeout(() => input.focus(), 60);
-    });
+    }, () => resolve(answer));
   });
 }
 

@@ -16,10 +16,58 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v15';
+self.APP_VERSION = 'flexloop-v21';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v21',
+    items: [
+      ['Sheets stop a quarter down the screen',
+       'A long one used to reach the status bar, leaving nowhere to tap to get out. There is always a quarter of backdrop above it now.'],
+      ['The grab handle works',
+       'Drag it down to throw the sheet away, or tap it. It has looked draggable since the first version and did nothing at all until now.'],
+    ],
+  },
+  {
+    v: 'flexloop-v20',
+    items: [
+      ['Room above the home indicator',
+       'The tab labels ended about 4px short of the indicator, near enough to touch it. They now clear it by about 15px, which costs the bar 12px of height.'],
+    ],
+  },
+  {
+    v: 'flexloop-v19',
+    items: [
+      ['The tab bar setting is gone again',
+       'Comfortable and Compact came in to work around the short viewport. That turned out to be the Home Screen icon, so the choice was solving nothing. Appearance is back to Theme alone.'],
+    ],
+  },
+  {
+    v: 'flexloop-v18',
+    items: [
+      ['The band under the tab bar was the icon',
+       'The old Home Screen icon launched the app 59px shorter than the screen. Deleting it and adding it again fixed it. No code was at fault, so none changed.'],
+      ['The Display readout is gone',
+       'It did its job: it showed the app ended 59px above the bottom of the screen, which no tab bar could explain. Settings is back to normal.'],
+    ],
+  },
+  {
+    v: 'flexloop-v17',
+    items: [
+      ['A Compact tab bar',
+       'Settings → Appearance → Tab bar. Compact trims the row, its icons and the strip beneath them: 57px down to 47px on the Home Screen.'],
+      ['A Display readout, for now',
+       'Settings prints what the screen reports, and can draw a line on the edge of the app. It is here to find the black band under the tab bar, then it goes.'],
+    ],
+  },
+  {
+    v: 'flexloop-v16',
+    items: [
+      ['A shorter tab bar, properly this time',
+       'v15 meant to let the home indicator pay for part of the row, but a 44px floor swallowed it. The row now overlaps the strip: 79px down to 57px.'],
+    ],
+  },
   {
     v: 'flexloop-v15',
     items: [

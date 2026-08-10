@@ -41,6 +41,12 @@ editing for your repo name.
 4. Open it once more while online so the service worker finishes caching, then you
    can go offline for good.
 
+If the app ever launches shorter than the screen — a dead strip along the bottom
+that no layout change touches — the Home Screen icon is holding a stale launch
+configuration. Delete the icon and add it again from Safari. iOS captures how the
+app launches at the moment you add it, and nothing you ship afterwards can
+correct it.
+
 ## Ship an update
 
 1. Edit whatever you want to change.
