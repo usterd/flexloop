@@ -1516,8 +1516,8 @@ async function viewSettings() {
     <div class="btn-row" style="margin-top:8px">
       <button class="btn btn-sm" data-act="export-csv">Export CSV</button>
       <button class="btn btn-sm" data-act="import-csv">Import CSV</button>
-      <button type="button" class="icon-btn" data-act="csv-info" style="flex:0 0 auto"
-        aria-label="About the CSV format">${ICON_INFO}</button>
+      <button type="button" class="icon-btn" data-act="data-info" style="flex:0 0 auto"
+        aria-label="About export and import">${ICON_INFO}</button>
     </div>
     <input type="file" id="file-json" accept=".json,application/json" hidden>
     <input type="file" id="file-csv" accept=".csv,text/csv,text/plain" hidden>
@@ -2336,7 +2336,7 @@ document.addEventListener('click', async (e) => {
     case 'export-csv':  doExportCsv(); break;
     case 'import':      $('#file-json').click(); break;
     case 'import-csv':  $('#file-csv').click(); break;
-    case 'csv-info':    csvFormatSheet(); break;
+    case 'data-info':   dataFormatSheet(); break;
     case 'load-demo':   loadDemoData(); break;
     case 'remove-demo': removeDemoData(); break;
 
@@ -2561,7 +2561,7 @@ const INFO = {
       ['Export, regularly',
        `This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after ${EXPORT_NAG_DAYS} days.`],
       ['Import',
-       'Import backup asks whether to merge or replace. Merge adds the file’s sessions, exercises and routines to what is here and leaves your settings alone; Replace wipes the device first, settings included. Where both hold the same session, the file wins. Import CSV always merges — tap the ⓘ beside it for the format.'],
+       'Import backup asks whether to merge or replace: merge keeps what is already here and leaves your settings alone, replace wipes the device first. Import CSV always merges, deleting nothing. The ⓘ beside those buttons has the detail on both, and on what each file carries.'],
       ['Sample data',
        'With no history logged, the Log offers Load sample data: six months of an example split, so the charts and records have something to show. It never touches your settings, and Remove sample data here takes all of it back out, leaving anything you logged yourself — including any sample exercise you have since used.'],
       ['Target to beat',
@@ -2608,21 +2608,29 @@ function infoSheet() {
 }
 
 /**
- * The ⓘ beside the CSV buttons. The format is explained here rather than in
- * the Settings info sheet so it sits within reach of the buttons it is about.
+ * The ⓘ under the four export/import buttons, covering both formats. The
+ * mechanics live here rather than in the Settings info sheet so they sit
+ * within reach of the buttons they are about — that sheet says why to keep
+ * exporting, this one says what each file actually holds.
  */
-function csvFormatSheet() {
+function dataFormatSheet() {
   const items = [
-    ['One row per set',
+    ['Export backup — .json',
+     'Everything, exactly as stored: sessions, exercises, routines and your settings. This is the lossless one and the only real backup — which is why only this button counts towards the export reminder, and a CSV never does.'],
+    ['Import backup — merge or replace',
+     'Merge adds the file’s sessions, exercises and routines to what is already here and leaves your settings alone. Replace wipes this device first, settings included. Both match on id, so where the two hold the same session the file wins outright — it is not a line-by-line merge of the two versions.'],
+    ['Reading a backup elsewhere',
+     'It is plain JSON, so any text editor opens it. schemaVersion says which shape it is in; flexloop refuses a file written by a newer version of the app rather than guess at it.'],
+    ['CSV — one row per set',
      'Plain text, opens in any spreadsheet. Columns: App Version, Routine Name, Exercise Name, Exercise Type, Weight, Rep, Duration, Date. The date carries a time, which is what keeps sets in order.'],
     ['Import CSV',
      'Reads that shape and always merges — nothing already here is deleted. Sets sharing a calendar day become one session. (Import CSV from for example Strongify.)'],
     ['Export CSV',
-     'Writes the same file, working sets only. Routines, settings, RPE, warmup flags and unfinished sets have no column and do not survive the trip. The .json backup is the complete one.'],
+     'Writes the same file, working sets only. Routines, settings, RPE, warmup flags and unfinished sets have no column and do not survive the trip. Use the .json to move between devices; use the CSV to take your history somewhere else.'],
   ];
   openSheet(`
-    <h2>About the CSV format</h2>
-    <p class="sub">How history gets in and out of flexloop as a spreadsheet.</p>
+    <h2>About export and import</h2>
+    <p class="sub">What each file carries, and what it leaves behind.</p>
     <div class="info-list">
       ${items.map(([t, d]) => `<div class="info-item">
         <span class="t">${esc(t)}</span>

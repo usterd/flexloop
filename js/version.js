@@ -29,6 +29,8 @@ self.APP_CHANGELOG = [
        'Restoring a backup no longer always wipes the device. Merge adds the file to what is here and leaves your settings alone; Replace is the old behaviour.'],
       ['Export CSV',
        'History leaves as a spreadsheet as well as a backup, in the same columns Import CSV reads. Working sets only — the .json is still the complete copy.'],
+      ['An ⓘ for your data',
+       'Beside the export and import buttons, explaining what each of the two files carries and what it drops. The CSV no longer names another app on the button itself.'],
     ],
   },
   {

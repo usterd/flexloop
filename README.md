@@ -125,9 +125,12 @@ routines to what is already here and leaves your settings alone; Replace wipes t
 device first, settings included. Both are a put keyed by id, so where the two hold
 the same session the file wins — it is not a field-level merge.
 
-**Settings → Import CSV / Export CSV** are the interchange pair, with the format
-behind the ⓘ beside them. One row per set, in the column order a Strongify backup
-uses:
+The **ⓘ** under the four buttons explains all of this in the app — both formats,
+what each one carries, and what it leaves behind. The Settings info sheet keeps
+only the *why*: that the storage is evictable and the export habit is not optional.
+
+**Settings → Import CSV / Export CSV** are the interchange pair. One row per set,
+in the column order a Strongify backup uses:
 
 ```
 App Version,Routine Name,Exercise Name,Exercise Type,Weight,Rep,Duration,Date
