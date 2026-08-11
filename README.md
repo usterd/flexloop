@@ -117,14 +117,43 @@ file is the only real backup.
 
 ---
 
-## Importing your history
+## Getting data in and out
 
-**Settings → Import Strongify CSV** reads a Strongify backup and merges it in. Sets
-recorded on the same calendar day become one session; the routine name is kept as
-the session note. Nothing already on the device is deleted.
+**Settings → Import backup** restores a flexloop `.json` export, and asks first
+whether to **merge** or **replace**. Merge adds the file's sessions, exercises and
+routines to what is already here and leaves your settings alone; Replace wipes the
+device first, settings included. Both are a put keyed by id, so where the two hold
+the same session the file wins — it is not a field-level merge.
 
-**Settings → Import backup** restores a flexloop `.json` export. This one *replaces*
-everything, and asks first.
+**Settings → Import CSV / Export CSV** are the interchange pair, with the format
+behind the ⓘ beside them. One row per set, in the column order a Strongify backup
+uses:
+
+```
+App Version,Routine Name,Exercise Name,Exercise Type,Weight,Rep,Duration,Date
+```
+
+Import always merges and deletes nothing; sets recorded on the same calendar day
+become one session, and the routine name is kept as the session note. Export writes
+completed working sets only — the reader stamps every row it sees as a finished
+working set, so exporting a warmup or an unfinished one would bring it back as
+something it never was. Routines, settings, RPE and warmup flags have no column at
+all. **The `.json` is the only lossless format**, which is also why exporting CSV
+does not reset the backup nag.
+
+## Sample data
+
+With nothing logged, the Log offers **Load sample data**: six months of an example
+Push / Pull / Legs split, one to two sessions a week, generated backwards from the
+most recent Monday so the charts have something recent to draw. It exists so a
+fresh install is not a blank wall.
+
+Ids are deterministic (`ex_demo_…`, `s_demo_…`, `r_demo_…`), so loading twice in
+one week overwrites rather than duplicates, and settings are never touched —
+`js/demo.js` returns a backup-shaped object with no `settings` key and it goes in
+through the same merge path as a CSV import. **Settings → Remove sample data**
+appears while it is loaded and takes all of it back out, keeping anything you
+logged yourself along with any sample exercise one of your own sessions now uses.
 
 ## Routines
 
@@ -265,7 +294,8 @@ js/db.js                IndexedDB wrapper (exercises, sessions, routines),
                         export/import, settings
 js/stats.js             e1RM, volume, PRs, targets, weekly aggregates, dates
 js/charts.js            hand-written SVG line and bar charts
-js/importers.js         Strongify CSV reader
+js/importers.js         CSV reader and writer
+js/demo.js              the sample dataset behind "Load sample data"
 icons/                  192, 512, and the 180px apple-touch-icon
 .nojekyll               stops Pages from running Jekyll
 ```
