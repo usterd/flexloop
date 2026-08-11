@@ -16,10 +16,19 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v24';
+self.APP_VERSION = 'flexloop-v25';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v25',
+    items: [
+      ['The wordmark opens the project',
+       'Tapping “flexloop” in the topbar opens the project page in a new tab. Nothing else in the header moved.'],
+      ['Reload app, and Check for update',
+       'Settings → App reopens the page — useful on the Home Screen, where there is no address bar — or asks the server for a newer version rather than waiting for the browser to look.'],
+    ],
+  },
   {
     v: 'flexloop-v24',
     items: [

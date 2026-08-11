@@ -2641,6 +2641,8 @@ const INFO = {
        'Which metric the Log’s target line, the Next target tile and the finish-session read-out all measure. Estimated 1RM responds to weight and reps both; Heaviest set and Reps are blunter; Volume is the easiest to beat, since another set does it. None turns all three off. A lift that has never carried a load is always measured in reps.'],
       ['Theme',
        'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
+      ['Reload app and Check for update',
+       'Installed on the Home Screen there is no address bar, so Reload app is the way to reopen the page as it stands. Check for update goes further and asks the server whether a newer version exists — the browser only looks on its own schedule otherwise. A new one installs in the background and offers a Reload toast, so a version never lands mid-set.'],
       ['The version at the foot',
        `Tap it for the version history — what changed in each release. The offline cache is named after it (${APP_VERSION}), so it changes whenever the app itself does.`],
     ],
