@@ -1659,6 +1659,20 @@ async function viewSettings() {
         ${(est.usage / 1048576).toFixed(2)} MB used${est.quota ? ` of ${(est.quota / 1048576).toFixed(0)} MB available` : ''}</p>` : ''}
     </div>
 
+    <h3 class="h-sec">App</h3>
+    <div class="btn-row">
+      <button class="btn" data-act="reload-app">Reload app</button>
+      <button class="btn" data-act="check-update">Check for update</button>
+    </div>
+    <button class="btn btn-block btn-sm" style="margin-top:8px" data-act="clear-cache">Clear offline cache</button>
+    <p class="meta" style="text-align:left;padding:6px 0 0">
+      Reload app reopens the page as it is right now. Check for update asks the
+      server for a newer version; if one exists it installs quietly in the
+      background and offers a “Reload” toast to switch to it. Clear offline
+      cache throws away every stored copy of the app and fetches it again — for
+      when the files moved but the version did not. None of the three touch
+      your sessions.</p>
+
     <hr class="sep">
     ${hasDemoData() ? `
       <button class="btn btn-danger btn-block btn-sm" style="margin-bottom:10px"
@@ -2412,6 +2426,53 @@ document.addEventListener('click', async (e) => {
       if (currentTab() === 'settings') render();
       break;
 
+    case 'reload-app':
+      location.reload();
+      break;
+
+    case 'check-update': {
+      if (!('serviceWorker' in navigator)) { toast('Service worker not supported'); break; }
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) { toast('Service worker not registered'); break; }
+      try {
+        await reg.update();
+      } catch (err) {
+        toast('Could not check for updates');
+        break;
+      }
+      // If a new worker isn't installing/waiting, the byte-for-byte check
+      // found nothing new. Otherwise the updatefound/controllerchange
+      // listeners in registerSW() take it from here and surface their own
+      // "Update ready" toast once the new worker has taken control.
+      if (!reg.installing && !reg.waiting) toast(`Already on the latest version (${VERSION_SHORT})`);
+      break;
+    }
+
+    // Check for update only notices a changed sw.js. Redeploy the same version
+    // over itself and the worker is byte-identical, so nothing is found and the
+    // old shell keeps being served. Emptying the cache is the way out: the
+    // active worker misses on every request afterwards and refills from the
+    // network, which is also why this needs a connection to be worth doing.
+    case 'clear-cache': {
+      if (!('caches' in window)) { toast('Cache storage not supported'); break; }
+      if (navigator.onLine === false) { toast('Go online first — the app refetches itself'); break; }
+      const ok = await confirmSheet({
+        title: 'Clear the offline cache?',
+        body: 'Every stored copy of the app is deleted and fetched again on the next load. Your sessions, exercises, routines and settings are not touched. Needs a connection.',
+        confirm: 'Clear and reload', danger: true,
+      });
+      if (!ok) return;
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      } catch (err) {
+        toast('Could not clear the cache');
+        break;
+      }
+      location.reload();
+      break;
+    }
+
     case 'dismiss-hint':
       localStorage.setItem('flexloop.a2hs', '1');
       btn.closest('.hint').remove();
@@ -2609,6 +2670,8 @@ const INFO = {
        'Which metric the Log’s target line, the Next target tile and the finish-session read-out all measure. Estimated 1RM responds to weight and reps both; Heaviest set and Reps are blunter; Volume is the easiest to beat, since another set does it. None turns all three off. A lift that has never carried a load is always measured in reps.'],
       ['Theme',
        'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
+      ['Reload app, Check for update, Clear offline cache',
+       'Installed on the Home Screen there is no address bar, so Reload app is the way to reopen the page as it stands. Check for update asks the server whether a newer version exists — the browser only looks on its own schedule otherwise — and a new one installs in the background behind a Reload toast, so it never lands mid-set. Clear offline cache is the blunt one: it deletes every stored copy of the app so the next load fetches all of it again, which is what to reach for when a release was redeployed under a version number that did not change. It needs a connection, and none of the three touch your data.'],
       ['The version at the foot',
        `Tap it for the version history — what changed in each release. The offline cache is named after it (${APP_VERSION}), so it changes whenever the app itself does.`],
     ],
