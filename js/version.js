@@ -16,10 +16,23 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v22';
+self.APP_VERSION = 'flexloop-v23';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v23',
+    items: [
+      ['Sample data, for an empty app',
+       'With nothing logged, the Log offers six months of an example split so the charts and records have something to show. Settings removes it again, keeping anything you logged.'],
+      ['Import asks: merge or replace',
+       'Restoring a backup no longer always wipes the device. Merge adds the file to what is here and leaves your settings alone; Replace is the old behaviour.'],
+      ['Export CSV',
+       'History leaves as a spreadsheet as well as a backup, in the same columns Import CSV reads. Working sets only — the .json is still the complete copy.'],
+      ['An ⓘ for your data',
+       'Beside the export and import buttons, explaining what each of the two files carries and what it drops. The CSV no longer names another app on the button itself.'],
+    ],
+  },
   {
     v: 'flexloop-v22',
     items: [

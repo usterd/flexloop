@@ -15,7 +15,8 @@ import './version.js';
 import * as db from './db.js';
 import * as S from './stats.js';
 import { lineChart, barChart, setChart } from './charts.js';
-import { parseStrongifyCsv, looksLikeStrongify } from './importers.js';
+import { parseStrongifyCsv, looksLikeStrongify, toStrongifyCsv } from './importers.js';
+import { buildDemoData, isDemoExercise, isDemoRoutine } from './demo.js';
 
 /** The string the service worker caches under. */
 const APP_VERSION = self.APP_VERSION || 'flexloop';
@@ -79,6 +80,9 @@ const THEME_INK = { dark: '#08090B', light: '#F6F7F9' };
 
 const ICON_SUN = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.3M12 19.3v2.3M2.4 12h2.3M19.3 12h2.3M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>`;
 const ICON_MOON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.7 8.7 0 1 0 11.1 11.1z"/></svg>`;
+/* For info buttons rendered into a view. The topbar's own ⓘ is inline in
+   index.html so it paints before this file loads — keep the two in step. */
+const ICON_INFO = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.6" r="0.75" fill="currentColor" stroke="none"/></svg>`;
 
 const lightMedia = window.matchMedia('(prefers-color-scheme: light)');
 
@@ -261,6 +265,34 @@ function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
   });
 }
 
+/**
+ * confirmSheet with two ways to say yes. Resolves 'merge', 'replace', or
+ * null for every kind of dismissal.
+ */
+function chooseImportModeSheet({ title, body }) {
+  return new Promise((resolve) => {
+    let answer = null;
+    openSheet(`
+      <h2>${esc(title)}</h2>
+      <p class="sub">${esc(body)}</p>
+      <div class="rows" style="margin-top:14px">
+        <button class="row" data-x="merge"><span class="grow"><span class="t">Merge</span>
+          <span class="s">Adds to what is here. Settings untouched, nothing deleted</span></span></button>
+        <button class="row" data-x="replace"><span class="grow"><span class="t" style="color:var(--danger)">Replace everything</span>
+          <span class="s">Wipes this device first, settings included</span></span></button>
+      </div>
+      <button class="btn btn-block" style="margin-top:14px" data-x="no">Cancel</button>`, (root) => {
+      root.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-x]');
+        if (!b) return;
+        // Record, then close — resolving here would race the dismiss callback.
+        answer = b.dataset.x === 'no' ? null : b.dataset.x;
+        closeSheet();
+      });
+    }, () => resolve(answer));
+  });
+}
+
 /** Resolves to the trimmed string, or null if cancelled or left empty. */
 function promptSheet({ title, body, label, value = '', placeholder = '', confirm = 'Save' }) {
   return new Promise((resolve) => {
@@ -437,6 +469,8 @@ function viewLog() {
         : 'No sessions logged yet. The first one sets your baseline.'}</p>
       <div style="height:18px"></div>
       <button class="btn btn-primary btn-lg btn-block" data-act="start">Start session</button>
+      ${state.sessions.length ? '' : `
+        <button class="btn btn-block" style="margin-top:8px" data-act="load-demo">Load sample data</button>`}
       ${routinePickerHtml()}
       ${todays.length ? `
         <h3 class="h-sec">Finished today</h3>
@@ -937,7 +971,8 @@ function viewSession(id) {
   }
   $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/history">Back</a>`;
   view.innerHTML = `
-    <p class="eyebrow">${session.endedAt ? 'Completed' : 'In progress'}${session.source === 'strongify' ? ' · imported' : ''}</p>
+    <p class="eyebrow">${session.endedAt ? 'Completed' : 'In progress'}${
+      session.source === 'strongify' ? ' · imported' : session.source === 'demo' ? ' · sample' : ''}</p>
     <h2 class="h-big">${esc(S.fmtDate(session.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</h2>
     <p class="sub">${esc(summaryLine(session))}</p>
     <div style="height:16px"></div>
@@ -1478,7 +1513,12 @@ async function viewSettings() {
       <button class="btn btn-primary" data-act="export">Export backup</button>
       <button class="btn" data-act="import">Import backup</button>
     </div>
-    <button class="btn btn-block btn-sm" style="margin-top:8px" data-act="import-csv">Import Strongify CSV</button>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-sm" data-act="export-csv">Export CSV</button>
+      <button class="btn btn-sm" data-act="import-csv">Import CSV</button>
+      <button type="button" class="icon-btn" data-act="data-info" style="flex:0 0 auto"
+        aria-label="About export and import">${ICON_INFO}</button>
+    </div>
     <input type="file" id="file-json" accept=".json,application/json" hidden>
     <input type="file" id="file-csv" accept=".csv,text/csv,text/plain" hidden>
 
@@ -1579,6 +1619,9 @@ async function viewSettings() {
     </div>
 
     <hr class="sep">
+    ${hasDemoData() ? `
+      <button class="btn btn-danger btn-block btn-sm" style="margin-bottom:10px"
+        data-act="remove-demo">Remove sample data</button>` : ''}
     <button class="btn btn-danger btn-block" data-act="erase">Erase all data</button>
     <p class="meta">flexloop ·
       <button type="button" class="linkish" data-act="version">${esc(VERSION_SHORT)}</button>
@@ -1813,21 +1856,43 @@ async function saveSessionAsRoutine(session) {
    EXPORT / IMPORT
    ========================================================================== */
 
-async function doExport() {
-  const data = await db.exportAll();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
+/** Hand a string to the browser as a file. The only way out of this app. */
+function download(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = `flexloop-${S.localDate()}.json`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function doExport() {
+  const data = await db.exportAll();
+  download(`flexloop-${S.localDate()}.json`, JSON.stringify(data, null, 2), 'application/json');
   state.settings.lastExportAt = Date.now();
   db.saveSettings(state.settings);
   toast(`Exported ${data.sessions.length} sessions`);
   render();
+}
+
+/**
+ * CSV is the interchange format, not a backup: it carries working sets and
+ * nothing else. lastExportAt is deliberately left alone — the nag exists
+ * because the .json is the only complete copy, and a lossy file must not
+ * silence it.
+ */
+async function doExportCsv() {
+  const data = await db.exportAll();
+  const csv = toStrongifyCsv({
+    sessions: data.sessions,
+    exercises: data.exercises,
+    appVersion: APP_VERSION,
+  });
+  download(`flexloop-${S.localDate()}.csv`, csv, 'text/csv');
+  const rows = csv.split('\n').length - 2; // less the header and trailing newline
+  toast(`Exported ${rows} sets`);
 }
 
 function readFile(input) {
@@ -1847,19 +1912,19 @@ async function doImportJson(input) {
     const data = JSON.parse(text);
     db.validateBackup(data);
     const nRoutines = Array.isArray(data.routines) ? data.routines.length : 0;
-    const ok = await confirmSheet({
-      title: 'Replace everything?',
+    const mode = await chooseImportModeSheet({
+      title: 'Merge or replace?',
       body: `This backup holds ${data.sessions.length} sessions, ${data.exercises.length} exercises${
         nRoutines ? ` and ${nRoutines} routine${nRoutines === 1 ? '' : 's'}` : ''
-      }. Importing replaces what is on this device now.`,
-      confirm: 'Replace', danger: true,
+      }. Merge adds them to what is here and leaves your settings alone. Replace wipes this device first, settings included. Either way the file wins where the two hold the same session.`,
     });
-    if (!ok) return;
-    const res = await db.importAll(data, 'replace');
+    if (!mode) return;
+    const res = await db.importAll(data, mode);
+    // Harmless re-read after a merge, which never writes settings.
     state.settings = db.loadSettings();
     await reload();
     render();
-    toast(`Restored ${res.sessions} sessions`);
+    toast(`${mode === 'merge' ? 'Merged' : 'Restored'} ${res.sessions} sessions`);
   } catch (err) {
     toast(err.message || 'Import failed.', null, null, 5000);
   } finally {
@@ -1873,7 +1938,7 @@ async function doImportCsv(input) {
     if (!looksLikeStrongify(text)) {
       const cont = await confirmSheet({
         title: 'Unfamiliar CSV',
-        body: 'This does not look like a Strongify export. flexloop will try to read it as one anyway.',
+        body: 'No Exercise Name or Routine Name header in this file. flexloop will read it in the usual column order anyway.',
         confirm: 'Try anyway',
       });
       if (!cont) return;
@@ -1895,6 +1960,59 @@ async function doImportCsv(input) {
   } finally {
     input.value = '';
   }
+}
+
+/* ------------------------------------------------------------ sample data */
+
+/** True while the sample dataset is on the device. Gates both its buttons. */
+const hasDemoData = () => state.sessions.some((s) => s.source === 'demo');
+
+async function loadDemoData() {
+  const data = buildDemoData({ unit: state.settings.unit });
+  const ok = await confirmSheet({
+    title: 'Load sample data?',
+    body: `${data.sessions.length} example sessions across six months, with ${data.exercises.length} exercises and ${data.routines.length} routines. Your settings are untouched, and Settings can remove all of it again.`,
+    confirm: 'Load it',
+  });
+  if (!ok) return;
+  const res = await db.importAll(data, 'merge');
+  await reload();
+  render();
+  toast(`Loaded ${res.sessions} sample sessions`);
+}
+
+/**
+ * The mirror of loadDemoData. Sessions and routines go by their id prefix,
+ * but an exercise is kept if any real session still uses it — otherwise
+ * logging one set against a sample lift and then removing the samples would
+ * leave that session reading "Removed exercise".
+ */
+async function removeDemoData() {
+  const doomed = state.sessions.filter((s) => s.source === 'demo');
+  const ok = await confirmSheet({
+    title: 'Remove sample data?',
+    body: `Deletes the ${doomed.length} sample sessions and their routines. Anything you logged yourself stays, along with any sample exercise you have since used.`,
+    confirm: 'Remove', danger: true,
+  });
+  if (!ok) return;
+
+  const keptIds = new Set();
+  for (const s of state.sessions) {
+    if (s.source === 'demo') continue;
+    for (const e of s.entries || []) keptIds.add(e.exerciseId);
+  }
+
+  await Promise.all([
+    ...doomed.map((s) => db.deleteSession(s.id)),
+    ...state.routines.filter((r) => isDemoRoutine(r.id)).map((r) => db.deleteRoutine(r.id)),
+    ...state.exercises
+      .filter((ex) => isDemoExercise(ex.id) && !keptIds.has(ex.id))
+      .map((ex) => db.deleteExercise(ex.id)),
+  ]);
+
+  await reload();
+  render();
+  toast(`Removed ${doomed.length} sample sessions`);
 }
 
 /* ==========================================================================
@@ -2215,8 +2333,12 @@ document.addEventListener('click', async (e) => {
     }
 
     case 'export':      doExport(); break;
+    case 'export-csv':  doExportCsv(); break;
     case 'import':      $('#file-json').click(); break;
     case 'import-csv':  $('#file-csv').click(); break;
+    case 'data-info':   dataFormatSheet(); break;
+    case 'load-demo':   loadDemoData(); break;
+    case 'remove-demo': removeDemoData(); break;
 
     case 'erase': {
       const ok = await confirmSheet({
@@ -2397,7 +2519,7 @@ const INFO = {
       ['Deleting a session',
        'Is done from inside it, at the bottom. It disappears from history, from your records, and from every chart.'],
       ['Imported sessions',
-       'Carry an “imported” mark at the top. A Strongify CSV becomes one session per calendar day, with the routine name kept as the note.'],
+       'Carry an “imported” mark at the top. A CSV becomes one session per calendar day, with the routine name kept as the note. Sample sessions are marked too.'],
       ['Volume, per month',
        'Σ weight × reps over completed working sets. Warmups never count.'],
     ],
@@ -2439,7 +2561,9 @@ const INFO = {
       ['Export, regularly',
        `This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after ${EXPORT_NAG_DAYS} days.`],
       ['Import',
-       'Import backup replaces everything on the device, and asks first. Import Strongify CSV merges instead, deleting nothing.'],
+       'Import backup asks whether to merge or replace: merge keeps what is already here and leaves your settings alone, replace wipes the device first. Import CSV always merges, deleting nothing. The ⓘ beside those buttons has the detail on both, and on what each file carries.'],
+      ['Sample data',
+       'With no history logged, the Log offers Load sample data: six months of an example split, so the charts and records have something to show. It never touches your settings, and Remove sample data here takes all of it back out, leaving anything you logged yourself — including any sample exercise you have since used.'],
       ['Target to beat',
        'Which metric the Log’s target line, the Next target tile and the finish-session read-out all measure. Estimated 1RM responds to weight and reps both; Heaviest set and Reps are blunter; Volume is the easiest to beat, since another set does it. None turns all three off. A lift that has never carried a load is always measured in reps.'],
       ['Theme',
@@ -2477,6 +2601,38 @@ function infoSheet() {
     <p class="sub">${esc(info.sub)}</p>
     <div class="info-list">
       ${info.items.map(([t, d]) => `<div class="info-item">
+        <span class="t">${esc(t)}</span>
+        <span class="s">${esc(d)}</span></div>`).join('')}
+    </div>
+    <button class="btn btn-block" style="margin-top:16px" data-close>Got it</button>`);
+}
+
+/**
+ * The ⓘ under the four export/import buttons, covering both formats. The
+ * mechanics live here rather than in the Settings info sheet so they sit
+ * within reach of the buttons they are about — that sheet says why to keep
+ * exporting, this one says what each file actually holds.
+ */
+function dataFormatSheet() {
+  const items = [
+    ['Export backup — .json',
+     'Everything, exactly as stored: sessions, exercises, routines and your settings. This is the lossless one and the only real backup — which is why only this button counts towards the export reminder, and a CSV never does.'],
+    ['Import backup — merge or replace',
+     'Merge adds the file’s sessions, exercises and routines to what is already here and leaves your settings alone. Replace wipes this device first, settings included. Both match on id, so where the two hold the same session the file wins outright — it is not a line-by-line merge of the two versions.'],
+    ['Reading a backup elsewhere',
+     'It is plain JSON, so any text editor opens it. schemaVersion says which shape it is in; flexloop refuses a file written by a newer version of the app rather than guess at it.'],
+    ['CSV — one row per set',
+     'Plain text, opens in any spreadsheet. Columns: App Version, Routine Name, Exercise Name, Exercise Type, Weight, Rep, Duration, Date. The date carries a time, which is what keeps sets in order.'],
+    ['Import CSV',
+     'Reads that shape and always merges — nothing already here is deleted. Sets sharing a calendar day become one session. (Import CSV from for example Strongify.)'],
+    ['Export CSV',
+     'Writes the same file, working sets only. Routines, settings, RPE, warmup flags and unfinished sets have no column and do not survive the trip. Use the .json to move between devices; use the CSV to take your history somewhere else.'],
+  ];
+  openSheet(`
+    <h2>About export and import</h2>
+    <p class="sub">What each file carries, and what it leaves behind.</p>
+    <div class="info-list">
+      ${items.map(([t, d]) => `<div class="info-item">
         <span class="t">${esc(t)}</span>
         <span class="s">${esc(d)}</span></div>`).join('')}
     </div>
