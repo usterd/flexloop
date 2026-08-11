@@ -16,10 +16,21 @@
    moved, not a commit message — and the sheet is read on a phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v23';
+self.APP_VERSION = 'flexloop-v24';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v24',
+    items: [
+      ['No more empty session from a dismissed picker',
+       'Start session used to write the session before you had picked anything. Dismiss the exercise picker any way and it sat there in progress, empty, hiding the routine list. It now waits for a pick.'],
+      ['A friendlier Start session',
+       'The idle Log opens on one of ten short lines instead of the date, and the button says what it does: pick exercises manually.'],
+      ['Routines carry the accent',
+       '“Start from a routine” is tinted the same colour as Start session, so the two ways into a session read as one choice.'],
+    ],
+  },
   {
     v: 'flexloop-v23',
     items: [
