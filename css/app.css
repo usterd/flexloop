@@ -591,6 +591,12 @@ body.has-rest .view { padding-bottom: 96px; }
 .btn-lg { min-height: 56px; font-size: 17px; border-radius: 14px; }
 .btn[disabled] { opacity: .4; pointer-events: none; }
 
+/* A button that carries a subtitle. The second line says what the tap actually
+   does, at the size of the .sub line above it, so it reads as a caption rather
+   than as a second label competing with the first. */
+.btn-stack { flex-direction: column; gap: 1px; padding-top: 8px; padding-bottom: 8px; line-height: 1.2; }
+.btn-stack .bs { font-size: 13px; font-weight: 500; letter-spacing: 0; opacity: .72; }
+
 .btn-row { display: flex; gap: 8px; }
 .btn-row > * { flex: 1; }
 
@@ -707,6 +713,13 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .row .r em { display: block; font-style: normal; font-size: 10.5px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
 .row.stale .r { color: var(--danger); }
+
+/* The routine list on the Log tab. It is the other way to start a session, so
+   it is outlined in the same accent the Start button is filled with — the two
+   read as one pair of choices rather than a button and some history. The inner
+   dividers stay neutral; accent on every one of them turns the list into a
+   ladder. */
+.rows-accent { border-color: var(--signal); }
 
 /* Like .rows, but read-only — the info sheet's tip list. No pointer cursor,
    no active-state flash, since tapping one does nothing. */
