@@ -452,6 +452,34 @@ window.addEventListener('hashchange', render);
    VIEW: LOG
    ========================================================================== */
 
+/**
+ * Stands in for the date on the idle Log. The date was the least useful thing
+ * on the screen — the phone's clock says it, and every row below is stamped
+ * with its own — so the largest text on the tab may as well push you into the
+ * session instead.
+ */
+const MOTIVATIONS = [
+  "Let's go!",
+  'Time to lift.',
+  'Show up again.',
+  'Make it count.',
+  'One more rep.',
+  'No zero days.',
+  'Beat last time.',
+  'Earn the rest.',
+  'Strong starts now.',
+  'Nobody lifts it for you.',
+];
+
+/* Rolled once per page load, not once per render: the idle Log rebuilds
+   whenever you come back to the tab or discard a session, and a line that
+   reshuffled underneath you would read as a glitch rather than a greeting. */
+let motivation = null;
+function motivationLine() {
+  if (motivation === null) motivation = MOTIVATIONS[Math.floor(Math.random() * MOTIVATIONS.length)];
+  return motivation;
+}
+
 function viewLog() {
   const session = activeSession();
   const view = $('#view');
@@ -463,12 +491,15 @@ function viewLog() {
     view.innerHTML = `
       ${hintHtml()}
       <p class="eyebrow">Today</p>
-      <h2 class="h-big">${esc(S.fmtDate(today, { weekday: 'long', day: 'numeric', month: 'short' }))}</h2>
+      <h2 class="h-big">${esc(motivationLine())}</h2>
       <p class="sub">${last
         ? `Last session ${esc(S.relativeDays(last.date))} — ${esc(summaryLine(last))}.`
         : 'No sessions logged yet. The first one sets your baseline.'}</p>
       <div style="height:18px"></div>
-      <button class="btn btn-primary btn-lg btn-block" data-act="start">Start session</button>
+      <button class="btn btn-primary btn-lg btn-block btn-stack" data-act="start">
+        <span class="bt">Start session</span>
+        <span class="bs">Pick exercises manually</span>
+      </button>
       ${state.sessions.length ? '' : `
         <button class="btn btn-block" style="margin-top:8px" data-act="load-demo">Load sample data</button>`}
       ${routinePickerHtml()}
@@ -536,7 +567,7 @@ function routinePickerHtml() {
         : 'new'}</span>
     </button>`).join('');
   return `<h3 class="h-sec">Start from a routine</h3>
-    <div class="rows">${rows}</div>
+    <div class="rows rows-accent">${rows}</div>
     ${state.routines.length > 6
       ? `<p class="meta" style="text-align:left;padding:8px 0 0"><a href="#/routines">All ${state.routines.length} routines</a></p>`
       : ''}`;
@@ -796,11 +827,21 @@ async function newSession() {
   return s;
 }
 
+/**
+ * Nothing is written until an exercise is actually picked. Creating the session
+ * up front and *then* opening the picker meant any dismissal — scrim tap, a
+ * swipe of the handle, a change of mind — left an empty in-progress session
+ * holding the Log screen: no routine list, no Start button, and the only ways
+ * out were Discard or the "add to session" confirm, until reload() aged it out
+ * 18h later.
+ */
 async function startSession() {
-  await newSession();
-  location.hash = '#/log';
-  render();
-  pickExercise();
+  pickExercise(async (exerciseId) => {
+    const session = activeSession() || await newSession();
+    await addExerciseToSession(session, exerciseId);
+    location.hash = '#/log';
+    render();
+  });
 }
 
 /** Open a session already filled in with a routine's exercises and sets. */

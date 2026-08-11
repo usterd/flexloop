@@ -591,6 +591,12 @@ body.has-rest .view { padding-bottom: 96px; }
 .btn-lg { min-height: 56px; font-size: 17px; border-radius: 14px; }
 .btn[disabled] { opacity: .4; pointer-events: none; }
 
+/* A button that carries a subtitle. The second line says what the tap actually
+   does, at the size of the .sub line above it, so it reads as a caption rather
+   than as a second label competing with the first. */
+.btn-stack { flex-direction: column; gap: 1px; padding-top: 8px; padding-bottom: 8px; line-height: 1.2; }
+.btn-stack .bs { font-size: 13px; font-weight: 500; letter-spacing: 0; opacity: .72; }
+
 .btn-row { display: flex; gap: 8px; }
 .btn-row > * { flex: 1; }
 
@@ -707,6 +713,27 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .row .r em { display: block; font-style: normal; font-size: 10.5px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
 .row.stale .r { color: var(--danger); }
+
+/* The routine list on the Log tab. It is the other way to start a session, so
+   it carries the Start button's accent dropped to --signal-d, the tint the app
+   already uses for fills behind accent text. That token is the reason this is
+   not a color-mix against white: it holds a deep warm brown in the dark theme
+   and a cream in the light one, so "paler" means paler *towards the page*
+   rather than always lighter. Edge, dividers and press state are mixed from
+   --signal itself, which flips with the theme for the same reason.
+
+   Pressed means more accent, which lightens the fill in the dark theme and
+   darkens it in the light one — the right direction for feedback in both. */
+.rows-accent {
+  background: var(--signal-d);
+  border-color: color-mix(in srgb, var(--signal) 30%, var(--edge));
+}
+.rows-accent .row { border-bottom-color: color-mix(in srgb, var(--signal) 16%, transparent); }
+.rows-accent .row:active { background: color-mix(in srgb, var(--signal) 18%, transparent); }
+/* The tint sits above --slab on the dark theme, which drags the --dim caption
+   down to 2.3:1 against it — below where it started. One step up to --mist puts
+   the line back at 4.2:1 dark and 6.4:1 light, both better than the plain row. */
+.rows-accent .row .s { color: var(--mist); }
 
 /* Like .rows, but read-only — the info sheet's tip list. No pointer cursor,
    no active-state flash, since tapping one does nothing. */
