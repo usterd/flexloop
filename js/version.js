@@ -27,6 +27,8 @@ self.APP_CHANGELOG = [
        'Tapping “flexloop” in the topbar opens the project page in a new tab. Nothing else in the header moved.'],
       ['Reload app, and Check for update',
        'Settings → App reopens the page — useful on the Home Screen, where there is no address bar — or asks the server for a newer version rather than waiting for the browser to look.'],
+      ['Clear offline cache',
+       'Beneath those two, for when a release was redeployed without the version changing: it drops every stored copy of the app and fetches it again. Your data stays.'],
     ],
   },
   {
