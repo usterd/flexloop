@@ -1,7 +1,7 @@
 /* =========================================================================
-   importers.js — bring history in from other apps.
+   importers.js — history in and out as CSV.
 
-   Currently handles the Strongify CSV backup, whose columns are:
+   One row per set, in the column order the Strongify backup uses:
      App Version, Routine Name, Exercise Name, Exercise Type,
      Weight, Rep, Duration, Date
 
@@ -10,6 +10,10 @@
      2. Exercise names can contain a raw newline mid-field without being
         quoted, which breaks any naive line-per-row split. We reassemble
         a record until it has all eight fields.
+
+   The writer lives here too, rather than beside the export button, because
+   the column list and the quoting rules are already here and a second copy
+   of either would drift from the parser that has to read it back.
    ========================================================================= */
 
 import { SCHEMA_VERSION } from './db.js';
@@ -163,4 +167,75 @@ export function parseStrongifyCsv(text) {
     sessions,
     _report: { sessions: sessions.length, exercises: exercises.size, skipped },
   };
+}
+
+/* ------------------------------------------------------------------ write */
+
+const COLUMNS = ['App Version', 'Routine Name', 'Exercise Name', 'Exercise Type',
+  'Weight', 'Rep', 'Duration', 'Date'];
+
+/**
+ * The mirror of splitFields. Quoting is not cosmetic here: records() reads
+ * columns by absolute index, so a single unquoted comma in an exercise name
+ * would shift Date off index 7 and the row would be dropped on the way back
+ * in — silently, as one of the "unreadable rows".
+ */
+export function csvField(v) {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Local ISO 8601 with the offset spelled out, e.g. 2026-07-13T18:34:00+02:00. */
+function isoLocal(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  // getTimezoneOffset is minutes *behind* UTC, so the sign is inverted.
+  const off = -d.getTimezoneOffset();
+  const sign = off < 0 ? '-' : '+';
+  const abs = Math.abs(off);
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
+    `${sign}${p(Math.floor(abs / 60))}:${p(abs % 60)}`;
+}
+
+/**
+ * The whole history as one CSV string, oldest session first.
+ *
+ * Only completed working sets are written. The parser stamps done: true and
+ * isWarmup: false on everything it reads, so exporting a warmup or an
+ * unfinished set would bring it back as a working one and inflate every
+ * number that follows.
+ */
+export function toStrongifyCsv({ sessions = [], exercises = [], appVersion = 'flexloop' } = {}) {
+  const byId = new Map(exercises.map((e) => [e.id, e]));
+  const rows = [COLUMNS.join(',')];
+
+  const ordered = sessions.slice().sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+  for (const session of ordered) {
+    // flexloop keeps no per-set clock. The parser sorts by timestamp and takes
+    // the session's start and end from the earliest and latest row of the day,
+    // so the times have to be distinct and in order — a minute apart will do.
+    let n = 0;
+    const base = session.startedAt || Date.parse(`${session.date}T18:00:00`) || Date.now();
+    for (const entry of session.entries || []) {
+      const ex = byId.get(entry.exerciseId);
+      for (const set of entry.sets || []) {
+        if (!set.done || set.isWarmup) continue;
+        // A set with neither reps nor duration is dropped on re-import.
+        if (!set.reps && !set.duration) continue;
+        rows.push([
+          appVersion,
+          (session.notes || '').trim() || (ex && ex.muscleGroup) || 'flexloop',
+          (ex && ex.name) || 'Unknown exercise',
+          ex && ex.isBodyweight ? 'Bodyweight' : 'Weight',
+          set.weight || 0,
+          set.reps || 0,
+          set.duration || '',
+          isoLocal(base + n * 60000),
+        ].map(csvField).join(','));
+        n++;
+      }
+    }
+  }
+  return `${rows.join('\n')}\n`;
 }

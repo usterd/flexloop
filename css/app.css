@@ -9,6 +9,16 @@
    Signature    the "ghost" — last session's numbers sit under every live set
                 row in dim mono, so the loop from last time to this time is
                 always visible without a tap.
+
+   THEMES       Every colour in the app is one of the tokens below, so the
+                light theme is a second set of values for the same names and
+                nothing downstream knows which one is live. Roles, not hues:
+                --ink is always "the page", --chalk always "text on it", so
+                in light mode they swap ends of the scale rather than gaining
+                a separate rule. The few places that need a colour *on* the
+                accent read --on-signal instead of hard-coding near-black,
+                because the light accent is dark enough to need white on it.
+                app.js writes data-theme="light" | "dark" on <html>.
    ========================================================================= */
 
 :root {
@@ -21,8 +31,16 @@
   --mist:     #858E9C;
   --dim:      #5A6371;
   --signal:   #FFB020;
-  --signal-d: #3A2B08;
+  --signal-h: #E39A12;   /* the accent, pressed */
+  --signal-d: #3A2B08;   /* accent tint, for fills behind accent text */
+  --on-signal:#150F00;   /* text/icons sitting on a --signal fill */
+  --hint-fg:  #FFD98A;
   --danger:   #FF5A47;
+  --stripe:   rgba(255,255,255,.02);
+  --scrim:    rgba(0,0,0,.6);
+  --shadow:   rgba(0,0,0,.55);
+
+  color-scheme: dark;
 
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -33,12 +51,64 @@
 
   --pad: 16px;
   --topbar-h: 52px;
-  --tabs-h: 58px;
+  --tabs-h: 52px;          /* row height when there is no bottom inset */
+  --tab-row-min: 42px;     /* floor for the visual row once the inset pays in */
+  --home-gutter: 25px;     /* strip of the inset left clear under the row */
 
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
+
+  /* Launched from the Home Screen the bottom inset becomes 34px. The previous
+     attempt at this asked the indicator to pay for part of the row, but the
+     44px floor always won — 52 - 34 never got near it — so the whole inset
+     went on stacking underneath: a 79px bar against the browser's 53px, 34px
+     of it empty. So the row overlaps the strip rather than perching on top of
+     it, keeping back only --home-gutter.
+
+     That gutter has to clear the indicator, not merely avoid the screen edge.
+     The pill is about 5px tall sitting about 8px up, so its top edge is ~13px
+     from the bottom; at 25px the labels bottom out around 29px and clear it by
+     about 15px. The floor can drop to 42px because the tap target is no longer
+     the row: .tab carries the gutter as padding, so the anchor is 68px tall
+     while the icon and label centre in the row above it. Installed that is
+     43 + 25 + 1 = 69px. --tabs-total adds the 1px border the bar draws.
+
+     Since v22 the app no longer asks iOS for a full-screen view in either
+     theme (see the status-bar meta in index.html), so on iOS the inset is 0
+     and this resolves to the plain 52 + 0 + 1 = 53px. The arithmetic above is
+     still live wherever an inset is genuinely non-zero: Safari as a browser,
+     landscape, and Android, where Chrome does paint behind the nav bar. */
+  --tab-pad-b:  min(var(--safe-b), var(--home-gutter));
+  --tab-paid:   max(0px, calc(var(--safe-b) - var(--tab-pad-b)));
+  --tab-row:    max(var(--tab-row-min), calc(var(--tabs-h) - var(--tab-paid)));
+  --tabs-total: calc(var(--tab-row) + var(--tab-pad-b) + 1px);
+}
+
+/* Light theme. Same names, other end of the scale. The accent darkens to
+   #B26A00 — #FFB020 on white is about 1.9:1 and unreadable as text — and
+   --on-signal turns white to keep the primary button legible. */
+:root[data-theme="light"] {
+  --ink:      #F6F7F9;
+  --slab:     #FFFFFF;
+  --slab-2:   #EFF2F6;
+  --edge:     #DFE4EC;
+  --edge-hi:  #C2CAD7;
+  --chalk:    #14171C;
+  --mist:     #4E5765;
+  --dim:      #6B7480;
+  --signal:   #B26A00;
+  --signal-h: #935800;
+  --signal-d: #FDF0DA;
+  --on-signal:#FFFFFF;
+  --hint-fg:  #7A4A00;
+  --danger:   #C0362B;
+  --stripe:   rgba(0,0,0,.035);
+  --scrim:    rgba(20,24,32,.45);
+  --shadow:   rgba(15,20,30,.18);
+
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -97,12 +167,14 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
 
 .topbar-inner {
   height: var(--topbar-h);
-  padding: 0 calc(var(--pad) + var(--safe-l)) 0 calc(var(--pad) + var(--safe-r));
+  padding: 0 calc(var(--pad) + var(--safe-r)) 0 calc(var(--pad) + var(--safe-l));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
+
+.topbar-left { display: flex; align-items: center; gap: 6px; }
 
 .wordmark {
   margin: 0;
@@ -113,13 +185,38 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
 }
 .wordmark span { color: var(--signal); }
 
+.wordmark-link { text-decoration: none; color: inherit; }
+
+/* Small round glyph button — the info trigger today, reusable wherever the
+   topbar needs an icon-only action that isn't route-specific. */
+.icon-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px; height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+.icon-btn:active { background: var(--slab-2); color: var(--chalk); }
+.icon-btn svg {
+  width: 18px; height: 18px;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
+}
+
 .topbar-action { display: flex; gap: 8px; align-items: center; }
 
 /* ------------------------------------------------------------------ view */
 
 .view {
   position: absolute;
-  inset: calc(var(--topbar-h) + var(--safe-t)) 0 calc(var(--tabs-h) + var(--safe-b)) 0;
+  inset: calc(var(--topbar-h) + var(--safe-t)) 0 var(--tabs-total) 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
@@ -137,7 +234,8 @@ body.has-rest .view { padding-bottom: 96px; }
   z-index: 40;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  padding-bottom: var(--safe-b);
+  /* No padding here: the gutter lives on .tab instead, so a tap that lands in
+     the home indicator strip still hits a tab rather than dead bar. */
   background: color-mix(in srgb, var(--ink) 92%, transparent);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
@@ -145,12 +243,13 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 
 .tab {
-  height: var(--tabs-h);
+  height: calc(var(--tab-row) + var(--tab-pad-b));
+  padding-bottom: var(--tab-pad-b);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   text-decoration: none;
   color: var(--dim);
   font-size: 10px;
@@ -158,6 +257,8 @@ body.has-rest .view { padding-bottom: 96px; }
   letter-spacing: 0.02em;
   position: relative;
 }
+/* Body line-height is 1.45, which the shorter row cannot spare. */
+.tab span { line-height: 1.15; }
 .tab svg {
   width: 22px; height: 22px;
   fill: none; stroke: currentColor;
@@ -284,7 +385,60 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .ghost b { color: var(--mist); font-weight: 600; }
 
+/* The target, directly under the ghost and built the same way, so the two read
+   as one block: what you did, then what would beat it. */
+.boost {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+  letter-spacing: -0.01em;
+  margin-top: 3px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+.boost[hidden] { display: none; }
+.boost::before {
+  content: "";
+  width: 12px; height: 1px;
+  background: var(--edge-hi);
+  flex: none;
+  align-self: center;
+}
+.boost b { color: var(--mist); font-weight: 600; }
+.boost i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--signal);
+  opacity: 0.85;
+  width: 100%;
+  padding-left: 18px;
+}
+/* Cleared. The whole line goes to the accent, since it is now a result. */
+.boost.is-hit { color: var(--signal); }
+.boost.is-hit b { color: var(--signal); }
+.boost.is-hit::before { background: var(--signal); }
+
 /* ------------------------------------------------------------- set rows */
+
+/* Column labels for the set grid below. Same columns as .set so "KG" and
+   "Reps" sit exactly over the box they describe — the whole point. */
+.set-head {
+  display: grid;
+  grid-template-columns: 22px 1fr 1fr 46px;
+  gap: 8px;
+  padding: 0 12px 5px 10px;
+}
+.set-head span {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--dim);
+  text-align: center;
+  text-transform: uppercase;
+}
 
 .sets { border-top: 1px solid var(--edge); }
 
@@ -298,8 +452,18 @@ body.has-rest .view { padding-bottom: 96px; }
   position: relative;
 }
 .set:last-child { border-bottom: 0; }
-.set.is-warmup { background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255,255,255,.02) 6px 12px); }
+.set.is-warmup { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--stripe) 6px 12px); }
 .set.is-done .num { color: var(--signal); }
+/* The set that just carried the exercise past its target. Not persisted — it
+   lasts as long as the card does, and the boost line holds the durable news. */
+.set.is-pr { background: var(--signal-d); }
+.set.is-pr .num::after {
+  content: "★";
+  display: block;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--signal);
+}
 
 .num {
   font-family: var(--mono);
@@ -372,7 +536,7 @@ body.has-rest .view { padding-bottom: 96px; }
 .set-done[aria-pressed="true"] {
   background: var(--signal);
   border-color: var(--signal);
-  color: #100C00;
+  color: var(--on-signal);
 }
 
 .set-foot {
@@ -418,16 +582,22 @@ body.has-rest .view { padding-bottom: 96px; }
 .btn-primary {
   background: var(--signal);
   border-color: var(--signal);
-  color: #150F00;
+  color: var(--on-signal);
   font-weight: 700;
 }
-.btn-primary:active { background: #E39A12; border-color: #E39A12; }
+.btn-primary:active { background: var(--signal-h); border-color: var(--signal-h); }
 .btn-quiet { background: transparent; color: var(--mist); }
 .btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--edge)); background: transparent; }
 .btn-block { width: 100%; }
 .btn-sm { min-height: 38px; font-size: 13.5px; padding: 0 12px; border-radius: 9px; }
 .btn-lg { min-height: 56px; font-size: 17px; border-radius: 14px; }
 .btn[disabled] { opacity: .4; pointer-events: none; }
+
+/* A button that carries a subtitle. The second line says what the tap actually
+   does, at the size of the .sub line above it, so it reads as a caption rather
+   than as a second label competing with the first. */
+.btn-stack { flex-direction: column; gap: 1px; padding-top: 8px; padding-bottom: 8px; line-height: 1.2; }
+.btn-stack .bs { font-size: 13px; font-weight: 500; letter-spacing: 0; opacity: .72; }
 
 .btn-row { display: flex; gap: 8px; }
 .btn-row > * { flex: 1; }
@@ -507,6 +677,9 @@ body.has-rest .view { padding-bottom: 96px; }
 .stat .v small { font-size: 13px; font-weight: 600; color: var(--mist); letter-spacing: 0; margin-left: 2px; }
 .stat .m { font-size: 12px; color: var(--dim); margin-top: 5px; display: block; }
 .stat.accent .v { color: var(--signal); }
+/* The Next target tile's unit is a word — "reps", "sets of 5" — not the "kg"
+   the 2px above was sized for, and at that gap it reads as one word. */
+.stat.next .v small { margin-left: 6px; }
 
 /* ------------------------------------------------------------------ list */
 
@@ -542,6 +715,133 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .row .r em { display: block; font-style: normal; font-size: 10.5px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
 .row.stale .r { color: var(--danger); }
+
+/* The routine list on the Log tab. It is the other way to start a session, so
+   it carries the Start button's accent dropped to --signal-d, the tint the app
+   already uses for fills behind accent text. That token is the reason this is
+   not a color-mix against white: it holds a deep warm brown in the dark theme
+   and a cream in the light one, so "paler" means paler *towards the page*
+   rather than always lighter. Edge, dividers and press state are mixed from
+   --signal itself, which flips with the theme for the same reason.
+
+   Pressed means more accent, which lightens the fill in the dark theme and
+   darkens it in the light one — the right direction for feedback in both. */
+.rows-accent {
+  background: var(--signal-d);
+  border-color: color-mix(in srgb, var(--signal) 30%, var(--edge));
+}
+.rows-accent .row { border-bottom-color: color-mix(in srgb, var(--signal) 16%, transparent); }
+.rows-accent .row:active { background: color-mix(in srgb, var(--signal) 18%, transparent); }
+/* The tint sits above --slab on the dark theme, which drags the --dim caption
+   down to 2.3:1 against it — below where it started. One step up to --mist puts
+   the line back at 4.2:1 dark and 6.4:1 light, both better than the plain row. */
+.rows-accent .row .s { color: var(--mist); }
+
+/* Like .rows, but read-only — the info sheet's tip list. No pointer cursor,
+   no active-state flash, since tapping one does nothing. */
+.info-list { border: 1px solid var(--edge); border-radius: var(--r-md); overflow: hidden; background: var(--slab); margin-top: 14px; }
+.info-item { padding: 12px 14px; border-bottom: 1px solid var(--edge); }
+.info-item:last-child { border-bottom: 0; }
+.info-item .t { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; display: block; }
+.info-item .s { font-size: 12.5px; color: var(--dim); margin-top: 3px; display: block; line-height: 1.5; }
+
+/* ------------------------------------------------- editable option lists */
+
+/* The Rest timer / Weight step editor. Like .rows, but each line carries its
+   own Remove button, so it cannot be one button per row. */
+.opt-list {
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--slab);
+}
+.opt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 5px 8px 5px 14px;
+  border-bottom: 1px solid var(--edge);
+}
+.opt-row:last-child { border-bottom: 0; }
+.opt-v {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.opt-note {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding-right: 6px;
+}
+
+/* -------------------------------------------------------------- routines */
+
+/* Like .rows, but each item carries its own controls, so the row cannot be
+   a single button. */
+.rt-list {
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--slab);
+  margin-bottom: 12px;
+}
+.rt-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--edge);
+}
+.rt-item:last-child { border-bottom: 0; }
+
+.rt-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rt-name.is-gone { color: var(--dim); font-weight: 500; font-style: italic; }
+
+.rt-sets {
+  display: flex;
+  align-items: center;
+  flex: none;
+  background: var(--slab-2);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  height: 40px;
+  overflow: hidden;
+}
+.rt-sets .step { height: 38px; width: 34px; font-size: 18px; }
+.rt-n {
+  width: 40px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+.rt-n em {
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  color: var(--dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
 
 /* ----------------------------------------------------------------- input */
 
@@ -601,17 +901,39 @@ select.input {
 .chart-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 2px 8px; gap: 10px; }
 .chart-head .eyebrow { margin: 0; }
 .chart-head .note { font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: 0.06em; }
-.chart { width: 100%; display: block; touch-action: pan-y; }
+/* A chart is a figure, not a document: a long press on one used to select the
+   SVG's tick labels and raise the iOS callout ("Copy · Look Up") over the
+   plot. Nothing in here is meant to be copied, and only the hit regions are
+   touchable, so a press never lands on a label or a bar in the first place. */
+.chart-wrap, .chart, .tip {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.chart { width: 100%; display: block; touch-action: pan-y; pointer-events: none; }
 .chart .axis { stroke: var(--edge); stroke-width: 1; }
 .chart .grid { stroke: var(--edge); stroke-width: 1; stroke-dasharray: 2 4; }
 .chart .tick { fill: var(--dim); font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em; }
 .chart .line { fill: none; stroke: var(--signal); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
-.chart .area { fill: url(#loopfade); }
+/* The area fill under a line chart. The gradient stops are styled here rather
+   than written as attributes in charts.js so the accent follows the theme —
+   an SVG `stop-color` attribute cannot hold a custom property. */
+.chart .fade-in  { stop-color: var(--signal); stop-opacity: .22; }
+.chart .fade-out { stop-color: var(--signal); stop-opacity: 0; }
+/* The rest between two sessions — drawn, but not as if it were lifting. */
+.chart .link { stroke: var(--signal); stroke-width: 1.5; stroke-dasharray: 3 3; opacity: 0.45; }
 .chart .dot { fill: var(--ink); stroke: var(--signal); stroke-width: 2; }
 .chart .dot.on { fill: var(--signal); }
 .chart .bar { fill: var(--edge-hi); }
 .chart .bar.on { fill: var(--signal); }
-.chart .hit { fill: transparent; }
+/* The moving average sits over the bars in chalk, not in the accent: the
+   accent already means "this is the bar you tapped", and a trend line in the
+   same colour would read as a selection running across the whole chart. */
+.chart .trend { fill: none; stroke: var(--chalk); stroke-width: 2; opacity: 0.9;
+                stroke-linejoin: round; stroke-linecap: round; }
+.chart .trend-dot { fill: var(--chalk); opacity: 0.9; }
+.chart .hit { fill: transparent; pointer-events: all; }
 
 .tip {
   position: absolute;
@@ -626,8 +948,20 @@ select.input {
   padding: 5px 8px;
   border-radius: 7px;
   pointer-events: none;
-  white-space: nowrap;
-  box-shadow: 0 6px 18px rgba(0,0,0,.5);
+  /* `pre`, not `nowrap`: a tooltip carrying a trend value puts it on a second
+     line, and neither line may wrap. */
+  white-space: pre;
+  text-align: center;
+  line-height: 1.35;
+  box-shadow: 0 6px 18px var(--shadow);
+}
+/* A tooltip raised by a sibling chart rather than by the thumb. One touch
+   answers the same question down the whole column, but only one of the four
+   readings was asked for: the echoes step back so the eye lands on the chart
+   that was actually touched, while staying legible enough to be read. */
+.tip.echo {
+  opacity: 0.55;
+  box-shadow: 0 4px 12px var(--shadow);
 }
 .chart-wrap { position: relative; }
 
@@ -636,7 +970,7 @@ select.input {
 .rest {
   position: fixed;
   left: 0; right: 0;
-  bottom: calc(var(--tabs-h) + var(--safe-b));
+  bottom: var(--tabs-total);
   z-index: 45;
   background: var(--slab-2);
   border-top: 1px solid var(--edge);
@@ -693,7 +1027,7 @@ select.input {
   letter-spacing: -0.01em;
   padding: 11px 15px;
   border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.6);
+  box-shadow: 0 10px 30px var(--shadow);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -714,11 +1048,16 @@ select.input {
 /* ----------------------------------------------------------------- sheet */
 
 .sheet { position: fixed; inset: 0; z-index: 70; }
-.sheet-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.6); animation: fade .2s ease-out; }
+.sheet-scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade .2s ease-out; }
 .sheet-panel {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  max-height: 88vh;
+  /* A percentage, not vh, and of .sheet — which is inset:0 on the viewport, the
+     same box the scrim fills. The two then agree by construction; with vh the
+     panel can outgrow the scrim wherever the unit and the layout viewport
+     disagree. Three quarters leaves a full quarter of scrim to tap, which on
+     the Home Screen is the only way out of a sheet that fills its cap. */
+  max-height: 75%;
   display: flex;
   flex-direction: column;
   background: var(--slab);
@@ -730,7 +1069,24 @@ select.input {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
-.sheet-grab { width: 38px; height: 4px; border-radius: 2px; background: var(--edge-hi); margin: 4px auto 14px; flex: none; }
+/* Drag-to-dismiss lives on this. touch-action:none is load-bearing — without it
+   iOS scrolls the panel instead of handing us the pointer stream. The ::after
+   grows a 4px pill into something aimable (~28x158px) without moving it; a
+   pseudo-element dispatches to its originating element, so it needs no wiring
+   of its own. The negative inset stays inside the 14px bottom margin so it
+   cannot sit over #sheet-body. */
+.sheet-grab {
+  width: 38px; height: 4px;
+  border-radius: 2px;
+  background: var(--edge-hi);
+  margin: 4px auto 14px;
+  flex: none;
+  position: relative;
+  touch-action: none;
+  cursor: grab;
+}
+.sheet-grab:active { cursor: grabbing; }
+.sheet-grab::after { content: ""; position: absolute; inset: -12px -60px; }
 .sheet h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
 .sheet .sub { margin-bottom: 14px; }
 @keyframes rise { from { transform: translateY(100%); } }
@@ -744,7 +1100,7 @@ select.input {
   align-items: flex-start;
   background: var(--signal-d);
   border: 1px solid color-mix(in srgb, var(--signal) 32%, transparent);
-  color: #FFD98A;
+  color: var(--hint-fg);
   border-radius: var(--r-md);
   padding: 12px 13px;
   font-size: 13.5px;
@@ -753,7 +1109,7 @@ select.input {
 }
 .hint b { color: var(--signal); }
 .hint button {
-  border: 0; background: transparent; color: #FFD98A;
+  border: 0; background: transparent; color: var(--hint-fg);
   font-size: 20px; line-height: 1; padding: 0 2px; cursor: pointer; flex: none;
 }
 
@@ -768,6 +1124,44 @@ select.input {
 .pr .k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim); text-transform: uppercase; }
 .pr .v { font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin-top: 3px; }
 
+/* ------------------------------------------------- finish-session debrief */
+
+/* Built like .rows, but these are read-only: nothing here is tappable. */
+.verdicts {
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--slab);
+  margin-top: 14px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--edge);
+  border-left: 2px solid transparent;
+}
+.verdict:last-child { border-bottom: 0; }
+.verdict .grow { flex: 1; min-width: 0; }
+.verdict .t { font-weight: 600; letter-spacing: -0.01em; display: block; }
+.verdict .s { font-size: 12.5px; color: var(--dim); display: block; margin-top: 2px; }
+.verdict .r {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--mist);
+  flex: none;
+}
+.verdict.v-pr { border-left-color: var(--signal); }
+.verdict.v-pr .s, .verdict.v-pr .r { color: var(--signal); }
+.verdict.v-up { border-left-color: var(--edge-hi); }
+.verdict.v-down .s { color: var(--danger); }
+
 .sep { height: 1px; background: var(--edge); margin: 22px 0; border: 0; }
 
 .meta {
@@ -778,6 +1172,23 @@ select.input {
   text-align: center;
   padding: 18px 0 4px;
 }
+
+/* The version at the foot of Settings. A button, because it opens the version
+   history, but it has to read as part of the .meta line it sits in — hence the
+   inherited font and the dotted underline rather than a button chrome. */
+.linkish {
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--mist);
+  background: none;
+  border: 0;
+  padding: 7px 3px;   /* a real tap target, pulled back out by the margin */
+  margin: -7px 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.linkish:active { color: var(--signal); }
 
 .swipe-note { font-size: 11.5px; color: var(--dim); text-align: center; padding: 8px 0 0; }
 

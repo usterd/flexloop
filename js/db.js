@@ -13,15 +13,21 @@
    ========================================================================= */
 
 const DB_NAME = 'flexloop';
-const DB_VERSION = 1;
-export const SCHEMA_VERSION = 1;
+const DB_VERSION = 2;
+export const SCHEMA_VERSION = 2;
 
 const STORE_EX = 'exercises';
 const STORE_SE = 'sessions';
+const STORE_RO = 'routines';
 
 let _db = null;
 
-/** Open (and if needed create) the database. Cached after the first call. */
+/**
+ * Open (and if needed create) the database. Cached after the first call.
+ *
+ * Every store is created behind a `contains` check, so this upgrade path is
+ * additive: a v1 database gains `routines` and keeps its rows.
+ */
 export function openDB() {
   if (_db) return Promise.resolve(_db);
   return new Promise((resolve, reject) => {
@@ -34,6 +40,9 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORE_SE)) {
         const s = db.createObjectStore(STORE_SE, { keyPath: 'id' });
         s.createIndex('date', 'date', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_RO)) {
+        db.createObjectStore(STORE_RO, { keyPath: 'id' });
       }
       void e;
     };
@@ -87,27 +96,80 @@ export const getSession = (id) => get(STORE_SE, id);
 export const saveSession = (s) => put(STORE_SE, s);
 export const deleteSession = (id) => del(STORE_SE, id);
 
+/* -------------------------------------------------------------- routines */
+
+/**
+ * A routine is an ordered exercise list and nothing more:
+ *   { id, name, items: [{ exerciseId, sets }], createdAt, updatedAt, lastUsedAt }
+ *
+ * Deliberately no target weights. Sets already prefill from the last time you
+ * trained the exercise, so a stored target would be a second, staler source of
+ * the same number.
+ */
+export const allRoutines = () => getAll(STORE_RO);
+export const saveRoutine = (r) => put(STORE_RO, r);
+export const deleteRoutine = (id) => del(STORE_RO, id);
+
 /* -------------------------------------------------------------- settings */
 
 const SETTINGS_KEY = 'flexloop.settings';
 
+/**
+ * The values the Rest timer, Weight step and Averaged over dropdowns offer.
+ * They are stored rather than hard-coded because the Settings tab lets you
+ * edit all three lists — 3.75 kg plates, a 75 second rest and a 6-session
+ * average are perfectly reasonable and nothing in the app should have an
+ * opinion about them.
+ */
+export const DEFAULT_REST_OPTIONS = [60, 90, 120, 150, 180, 240, 300];
+export const DEFAULT_WEIGHT_STEPS = [1, 1.25, 2.5, 5];
+export const DEFAULT_TREND_PERIODS = [3, 5, 8, 10, 12];
+
 const DEFAULT_SETTINGS = {
   unit: 'kg',              // display unit for every weight
-  theme: 'dark',
+  theme: 'dark',           // 'dark' | 'light' | 'auto' (follow the system)
   restTimerSeconds: 120,
+  restTimerOptions: DEFAULT_REST_OPTIONS,
   restTimerAuto: true,     // start the timer when a set is marked done
   weightStep: 2.5,
+  weightStepOptions: DEFAULT_WEIGHT_STEPS,
   repStep: 1,
   lastExportAt: 0,
+  // Trend line drawn over "Volume per session": 'off' | 'sma' | 'ema',
+  // averaged over this many sessions. See stats.movingAverage.
+  volumeTrend: 'sma',
+  volumeTrendPeriod: 5,
+  volumeTrendPeriodOptions: DEFAULT_TREND_PERIODS,
+  // The metric the Log's "beat it" line targets: 'off' | 'e1rm' | 'weight' |
+  // 'reps' | 'volume'. See stats.boostTarget.
+  boostMetric: 'e1rm',
 };
+
+/**
+ * Fill in anything the stored object is missing.
+ *
+ * The three list settings are copied, never shared: Object.assign would hand
+ * out the very array held by DEFAULT_SETTINGS, and the first edit in the
+ * option editor would then rewrite the defaults for the rest of the session.
+ */
+function withDefaults(stored) {
+  const s = Object.assign({}, DEFAULT_SETTINGS, stored || {});
+  s.restTimerOptions = Array.isArray(s.restTimerOptions)
+    ? s.restTimerOptions.slice() : DEFAULT_REST_OPTIONS.slice();
+  s.weightStepOptions = Array.isArray(s.weightStepOptions)
+    ? s.weightStepOptions.slice() : DEFAULT_WEIGHT_STEPS.slice();
+  s.volumeTrendPeriodOptions = Array.isArray(s.volumeTrendPeriodOptions)
+    ? s.volumeTrendPeriodOptions.slice() : DEFAULT_TREND_PERIODS.slice();
+  return s;
+}
 
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return Object.assign({}, DEFAULT_SETTINGS, raw ? JSON.parse(raw) : {});
+    return withDefaults(raw ? JSON.parse(raw) : null);
   } catch (err) {
     console.warn('settings unreadable, using defaults', err);
-    return Object.assign({}, DEFAULT_SETTINGS);
+    return withDefaults(null);
   }
 }
 
@@ -124,13 +186,16 @@ export function saveSettings(s) {
 
 /** The whole database as one plain object — the shape written to .json. */
 export async function exportAll() {
-  const [exercises, sessions] = await Promise.all([allExercises(), allSessions()]);
+  const [exercises, sessions, routines] = await Promise.all([
+    allExercises(), allSessions(), allRoutines(),
+  ]);
   return {
     schemaVersion: SCHEMA_VERSION,
     app: 'flexloop',
     exportedAt: new Date().toISOString(),
     exercises,
     sessions: sessions.slice().sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0)),
+    routines,
     settings: loadSettings(),
   };
 }
@@ -145,6 +210,10 @@ export function validateBackup(data) {
   if (!Array.isArray(data.sessions) || !Array.isArray(data.exercises)) {
     throw new Error('Backup is missing its sessions or exercises list.');
   }
+  // Routines arrived in schema v2. A v1 file simply has none, which is fine.
+  if (data.routines != null && !Array.isArray(data.routines)) {
+    throw new Error('Backup has a routines field that is not a list.');
+  }
   return true;
 }
 
@@ -154,16 +223,23 @@ export function validateBackup(data) {
  */
 export async function importAll(data, mode = 'replace') {
   validateBackup(data);
+  const routines = Array.isArray(data.routines) ? data.routines : [];
   if (mode === 'replace') {
     await clear(STORE_EX);
     await clear(STORE_SE);
+    await clear(STORE_RO);
   }
   await putMany(STORE_EX, data.exercises);
   await putMany(STORE_SE, data.sessions);
+  if (routines.length) await putMany(STORE_RO, routines);
   if (data.settings && mode === 'replace') {
-    saveSettings(Object.assign({}, DEFAULT_SETTINGS, data.settings));
+    saveSettings(withDefaults(data.settings));
   }
-  return { exercises: data.exercises.length, sessions: data.sessions.length };
+  return {
+    exercises: data.exercises.length,
+    sessions: data.sessions.length,
+    routines: routines.length,
+  };
 }
 
 /** Ask the browser not to evict us. Safe to call on every start. */
@@ -183,4 +259,4 @@ export async function storageEstimate() {
   try { return await navigator.storage.estimate(); } catch { return null; }
 }
 
-export { STORE_EX, STORE_SE };
+export { STORE_EX, STORE_SE, STORE_RO };

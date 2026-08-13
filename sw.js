@@ -1,14 +1,21 @@
 /* =========================================================================
    sw.js — offline shell.
 
-   TO SHIP AN UPDATE: bump CACHE_VERSION. Nothing else. The old cache is
-   deleted on activate and every file is fetched fresh.
+   TO SHIP AN UPDATE: bump APP_VERSION in js/version.js. Nothing else. The
+   old cache is deleted on activate and every file is fetched fresh.
+
+   The version lives there rather than here because Settings prints it, and a
+   number the app shows that disagrees with the one it caches under is worse
+   than no number at all. importScripts cannot read a module, which is why
+   version.js exports nothing and assigns to `self` instead.
 
    There is no network content in this app, so the strategy is simply
    cache-first with no network fallback worth speaking of.
    ========================================================================= */
 
-const CACHE_VERSION = 'flexloop-v2';
+importScripts('./js/version.js');
+
+const CACHE_VERSION = self.APP_VERSION;
 
 /* Explicit list. Anything missing here is missing offline. */
 const SHELL = [
@@ -17,10 +24,12 @@ const SHELL = [
   './manifest.webmanifest',
   './css/app.css',
   './js/app.js',
+  './js/version.js',
   './js/db.js',
   './js/stats.js',
   './js/charts.js',
   './js/importers.js',
+  './js/demo.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',

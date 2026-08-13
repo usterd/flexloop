@@ -8,10 +8,32 @@
    whole view (structural changes).
    ========================================================================= */
 
+// Side-effect import: version.js is shared with sw.js, which loads it through
+// importScripts and so cannot read exports. It sets self.APP_VERSION and
+// self.APP_CHANGELOG, read below.
+import './version.js';
 import * as db from './db.js';
 import * as S from './stats.js';
-import { lineChart, barChart } from './charts.js';
-import { parseStrongifyCsv, looksLikeStrongify } from './importers.js';
+import { lineChart, barChart, setChart } from './charts.js';
+import { parseStrongifyCsv, looksLikeStrongify, toStrongifyCsv } from './importers.js';
+import { buildDemoData, isDemoExercise, isDemoRoutine } from './demo.js';
+
+/** The string the service worker caches under. */
+const APP_VERSION = self.APP_VERSION || 'flexloop';
+const CHANGELOG = self.APP_CHANGELOG || [];
+
+/**
+ * The same version without the app name, for the Settings footer — which
+ * already says "flexloop" one word earlier and does not need to say it twice.
+ */
+const VERSION_SHORT = APP_VERSION.replace(/^flexloop-/, '');
+
+/**
+ * Days without an export before Settings starts asking for one. iOS clears
+ * the storage of a site it considers unused after roughly a week, so the
+ * reminder has to arrive inside that week to be of any use.
+ */
+const EXPORT_NAG_DAYS = 6;
 
 /* ------------------------------------------------------------------ state */
 
@@ -20,6 +42,7 @@ const state = {
   exercises: [],
   byId: new Map(),
   sessions: [],
+  routines: [],
   activeId: null,
   progressTab: localStorage.getItem('flexloop.progressTab') || 'overview',
   progressEx: localStorage.getItem('flexloop.progressEx') || null,
@@ -35,6 +58,70 @@ const esc = (s) => String(s == null ? '' : s)
 
 const uid = (p) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const unit = () => state.settings.unit;
+
+/* ------------------------------------------------------------------ theme
+
+   Two palettes, one set of CSS variable names — see the header of app.css.
+   The stored preference is 'dark' | 'light' | 'auto'; 'auto' is resolved
+   here rather than in CSS so that one attribute on <html> always states
+   which palette is actually live, and the topbar toggle has something
+   definite to flip. index.html repeats this resolution inline so the first
+   paint is already in the right theme.                                     */
+
+const THEMES = [
+  { id: 'dark',  label: 'Dark' },
+  { id: 'light', label: 'Light' },
+  { id: 'auto',  label: 'Match system' },
+];
+
+/* Must match --ink in each palette: this is the colour iOS paints behind
+   the status bar and around the safe areas. */
+const THEME_INK = { dark: '#08090B', light: '#F6F7F9' };
+
+const ICON_SUN = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.3M12 19.3v2.3M2.4 12h2.3M19.3 12h2.3M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>`;
+const ICON_MOON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.7 8.7 0 1 0 11.1 11.1z"/></svg>`;
+/* For info buttons rendered into a view. The topbar's own ⓘ is inline in
+   index.html so it paints before this file loads — keep the two in step. */
+const ICON_INFO = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.6" r="0.75" fill="currentColor" stroke="none"/></svg>`;
+
+const lightMedia = window.matchMedia('(prefers-color-scheme: light)');
+
+const systemTheme = () => (lightMedia.matches ? 'light' : 'dark');
+
+/** The palette actually on screen — never 'auto'. */
+function effectiveTheme() {
+  const t = state.settings.theme;
+  if (t === 'auto') return systemTheme();
+  return t === 'light' ? 'light' : 'dark';
+}
+
+function applyTheme() {
+  const t = effectiveTheme();
+  document.documentElement.dataset.theme = t;
+  const meta = $('#theme-color');
+  if (meta) meta.setAttribute('content', THEME_INK[t]);
+  // iOS only reads this one while parsing the head — index.html sets it there
+  // too. Kept in step here so the next launch starts from the right value.
+  const bar = $('#ios-status-bar');
+  if (bar) bar.setAttribute('content', t === 'light' ? 'default' : 'black');
+  const btn = $('#theme-btn');
+  if (btn) {
+    // The button shows the theme you would get, not the one you are in.
+    btn.innerHTML = t === 'dark' ? ICON_SUN : ICON_MOON;
+    btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  }
+}
+
+function setTheme(id) {
+  state.settings.theme = THEMES.some((t) => t.id === id) ? id : 'dark';
+  db.saveSettings(state.settings);
+  applyTheme();
+}
+
+// Following the system means following it as it changes, not only at launch.
+lightMedia.addEventListener('change', () => {
+  if (state.settings.theme === 'auto') applyTheme();
+});
 
 /* ------------------------------------------------------------------ toast */
 
@@ -56,22 +143,109 @@ function toast(message, actionLabel, onAction, ms = 3200) {
 
 /* ------------------------------------------------------------------ sheet */
 
-function openSheet(html, wire) {
+/**
+ * Runs when the sheet closes, however it closed. There are four ways out — the
+ * scrim, a [data-close] control, dragging the handle, and a sheet's own buttons
+ * — and confirmSheet/promptSheet have to settle their promise on all of them.
+ * Before this existed only their own buttons resolved, so a scrim tap left the
+ * await pending forever and the caller was abandoned mid-function: harmless
+ * where the next line is `if (!ok) return`, not harmless in doImportJson and
+ * doImportCsv, whose `finally { input.value = '' }` then never ran and left the
+ * file input unable to re-fire change for the same file.
+ */
+let sheetDismiss = null;
+
+function openSheet(html, wire, onDismiss) {
   const sheet = $('#sheet');
-  $('#sheet-body').innerHTML = html;
+  const old = $('#sheet-body');
+  // Sheets delegate their clicks from #sheet-body, and closing only emptied it,
+  // so every sheet used to leave its listener behind on a node the next sheet
+  // reused. Two menus opened in a row then both acted on one tap — with stale
+  // indices, which quietly deleted the wrong set. Swap in a fresh node instead.
+  const body = old.cloneNode(false);
+  body.innerHTML = html;
+  old.replaceWith(body);
+  sheetDismiss = onDismiss || null;
+  resetPanel();
   sheet.hidden = false;
-  if (wire) wire($('#sheet-body'));
+  if (wire) wire(body);
 }
 function closeSheet() {
+  // Cleared before the call, not after: the callback is free to open a sheet of
+  // its own, and would otherwise have its dismiss handler wiped by this one.
+  const fn = sheetDismiss;
+  sheetDismiss = null;
   $('#sheet').hidden = true;
   $('#sheet-body').innerHTML = '';
+  resetPanel();
+  if (fn) fn();
+}
+/** Drop whatever the drag left inline, so the next sheet opens clean. */
+function resetPanel() {
+  const p = $('.sheet-panel');
+  p.style.transform = '';
+  p.style.transition = '';
+  p.style.animation = '';
 }
 $('#sheet').addEventListener('click', (e) => {
   if (e.target.hasAttribute('data-close') || e.target.closest('[data-close]')) closeSheet();
 });
 
+/* Drag the grab handle down to dismiss. The handle is static markup — openSheet
+   only ever swaps #sheet-body — so this is wired once, here. */
+(function wireSheetDrag() {
+  const grab = $('.sheet-grab');
+  const panel = $('.sheet-panel');
+  let startY = 0;
+  let startedAt = 0;
+  let dy = 0;
+  let dragging = false;
+
+  grab.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    startY = e.clientY;
+    startedAt = e.timeStamp;
+    dy = 0;
+    grab.setPointerCapture(e.pointerId);
+    // The open animation is a transform too, and would fight the inline one.
+    panel.style.animation = 'none';
+    panel.style.transition = 'none';
+  });
+
+  grab.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    dy = Math.max(0, e.clientY - startY);   // this sheet only travels downwards
+    panel.style.transform = `translateY(${dy}px)`;
+  });
+
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const elapsed = Math.max(1, e.timeStamp - startedAt);
+    const far = dy > Math.max(60, panel.getBoundingClientRect().height * 0.25);
+    const flick = dy > 12 && dy / elapsed > 0.5;
+    // A tap is a drag that went nowhere. The handle looks like a control, so
+    // let it behave as one rather than springing back to no effect.
+    const tap = dy < 4 && elapsed < 250;
+    panel.style.transition = 'transform .18s ease-out';
+    if (far || flick || tap) {
+      panel.style.transform = 'translateY(100%)';
+      // On a timer rather than transitionend: a dropped event would strand the
+      // sheet open and translated off-screen, with no way back to it.
+      setTimeout(closeSheet, 180);
+    } else {
+      panel.style.transform = 'translateY(0)';
+    }
+  };
+  grab.addEventListener('pointerup', end);
+  grab.addEventListener('pointercancel', end);
+})();
+
 function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
   return new Promise((resolve) => {
+    // Dismissing any other way — scrim, handle — leaves this false, which is
+    // the same answer Cancel gives.
+    let answer = false;
     openSheet(`
       <h2>${esc(title)}</h2>
       <p class="sub">${esc(body)}</p>
@@ -82,20 +256,96 @@ function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
       root.addEventListener('click', (e) => {
         const b = e.target.closest('[data-x]');
         if (!b) return;
+        // Record, then close. Resolving here as well would race the dismiss
+        // callback closeSheet fires, and the cancelled value would win.
+        answer = b.dataset.x === 'yes';
         closeSheet();
-        resolve(b.dataset.x === 'yes');
       });
-    });
+    }, () => resolve(answer));
+  });
+}
+
+/**
+ * confirmSheet with two ways to say yes. Resolves 'merge', 'replace', or
+ * null for every kind of dismissal.
+ */
+function chooseImportModeSheet({ title, body }) {
+  return new Promise((resolve) => {
+    let answer = null;
+    openSheet(`
+      <h2>${esc(title)}</h2>
+      <p class="sub">${esc(body)}</p>
+      <div class="rows" style="margin-top:14px">
+        <button class="row" data-x="merge"><span class="grow"><span class="t">Merge</span>
+          <span class="s">Adds to what is here. Settings untouched, nothing deleted</span></span></button>
+        <button class="row" data-x="replace"><span class="grow"><span class="t" style="color:var(--danger)">Replace everything</span>
+          <span class="s">Wipes this device first, settings included</span></span></button>
+      </div>
+      <button class="btn btn-block" style="margin-top:14px" data-x="no">Cancel</button>`, (root) => {
+      root.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-x]');
+        if (!b) return;
+        // Record, then close — resolving here would race the dismiss callback.
+        answer = b.dataset.x === 'no' ? null : b.dataset.x;
+        closeSheet();
+      });
+    }, () => resolve(answer));
+  });
+}
+
+/** Resolves to the trimmed string, or null if cancelled or left empty. */
+function promptSheet({ title, body, label, value = '', placeholder = '', confirm = 'Save' }) {
+  return new Promise((resolve) => {
+    // Dismissed any other way and nothing was entered: same as Cancel.
+    let answer = null;
+    openSheet(`
+      <h2>${esc(title)}</h2>
+      ${body ? `<p class="sub">${esc(body)}</p>` : ''}
+      <div class="field" style="margin-top:14px">
+        <label for="pr-in">${esc(label)}</label>
+        <input class="input" id="pr-in" value="${esc(value)}" placeholder="${esc(placeholder)}"
+               autocapitalize="words" autocomplete="off" enterkeyhint="done">
+      </div>
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn" data-x="no">Cancel</button>
+        <button class="btn btn-primary" data-x="yes">${esc(confirm)}</button>
+      </div>`, (root) => {
+      const input = $('#pr-in', root);
+      const done = (ok) => {
+        // Read before closing: closeSheet empties #sheet-body and the input
+        // with it. Then close, and let the dismiss callback do the resolving.
+        const v = input.value.trim();
+        answer = ok && v ? v : null;
+        closeSheet();
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); });
+      root.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-x]');
+        if (b) done(b.dataset.x === 'yes');
+      });
+      // iOS only raises the keyboard for a focus inside the current task.
+      setTimeout(() => input.focus(), 60);
+    }, () => resolve(answer));
   });
 }
 
 /* ------------------------------------------------------------------- data */
 
+/** Most recently used first, then the never-used ones alphabetically. */
+function sortRoutines(list) {
+  return list.slice().sort((a, b) =>
+    (b.lastUsedAt || 0) - (a.lastUsedAt || 0) || a.name.localeCompare(b.name));
+}
+
 async function reload() {
-  const [exercises, sessions] = await Promise.all([db.allExercises(), db.allSessions()]);
+  const [exercises, sessions, routines] = await Promise.all([
+    db.allExercises(), db.allSessions(), db.allRoutines(),
+  ]);
   state.exercises = exercises.sort((a, b) => a.name.localeCompare(b.name));
   state.byId = new Map(exercises.map((e) => [e.id, e]));
   state.sessions = sessions;
+  state.routines = sortRoutines(routines);
+  historyCache.clear();
   // A session left open overnight is finished, not in progress. Close anything
   // older than 18h so the Log screen never reopens last week's workout.
   const open = sessions.find((s) => !s.endedAt);
@@ -130,24 +380,49 @@ const routes = [
   [/^#\/history$/,          () => viewHistory()],
   [/^#\/session\/(.+)$/,    (m) => viewSession(m[1])],
   [/^#\/progress$/,         () => viewProgress()],
-  [/^#\/data$/,             () => viewData()],
+  [/^#\/settings$/,         () => viewSettings()],
   [/^#\/exercises$/,        () => viewExercises()],
+  [/^#\/routines$/,         () => viewRoutines()],
+  [/^#\/routine\/(.+)$/,    (m) => viewRoutine(m[1])],
 ];
 
 function currentTab() {
   const h = location.hash;
   if (h.startsWith('#/history') || h.startsWith('#/session')) return 'history';
   if (h.startsWith('#/progress')) return 'progress';
-  if (h.startsWith('#/data') || h.startsWith('#/exercises')) return 'data';
+  if (h.startsWith('#/settings') || h.startsWith('#/exercises') || h.startsWith('#/routine')) return 'settings';
   return 'log';
 }
 
+/**
+ * What counts as "the same screen" for the purpose of keeping the scroll
+ * position. Progress holds its sub-tab and its exercise in state rather than in
+ * the hash, so switching either of those is a different screen and belongs at
+ * the top; changing a preference or adding a set is not.
+ */
+function screenKey() {
+  const h = location.hash;
+  return h.startsWith('#/progress')
+    ? `${h}|${state.progressTab}|${state.progressEx || ''}`
+    : h;
+}
+
+let renderedKey = null;
+
 async function render() {
   if (!location.hash || location.hash === '#') { location.replace('#/log'); return; }
+  // The Data tab became Settings. Old bookmarks, and the Home Screen icon of
+  // anyone who left the app on that tab, still point at #/data.
+  if (location.hash === '#/data') { location.replace('#/settings'); return; }
   const hash = location.hash;
   const hit = routes.find(([re]) => re.test(hash));
   const view = $('#view');
-  view.scrollTop = 0;
+  // Every view rebuilds #view from a string, which drops the scroll position.
+  // Arriving somewhere new should start at the top; re-rendering the screen you
+  // are already on — a new set, a changed preference — should not move you.
+  const key = screenKey();
+  const keepScroll = key === renderedKey ? view.scrollTop : 0;
+  historyCache.clear();
   $('#topbar-action').innerHTML = '';
   if (hit) {
     const m = hash.match(hit[0]);
@@ -157,11 +432,18 @@ async function render() {
       <h3>Nothing here</h3><p>That screen doesn't exist.</p>
       <a class="btn" href="#/log">Go to Log</a></div>`;
   }
+  renderedKey = key;
+  // After the await, so the new markup is in place; a taller offset than the
+  // fresh content simply clamps.
+  view.scrollTop = keepScroll;
   const tab = currentTab();
   $$('.tab').forEach((t) => {
     if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page');
     else t.removeAttribute('aria-current');
   });
+  // The info button explains whatever is on screen, so its label moves too.
+  const info = $('#info-btn');
+  if (info) info.setAttribute('aria-label', `About ${INFO[tab].title}`);
 }
 
 window.addEventListener('hashchange', render);
@@ -169,6 +451,34 @@ window.addEventListener('hashchange', render);
 /* ==========================================================================
    VIEW: LOG
    ========================================================================== */
+
+/**
+ * Stands in for the date on the idle Log. The date was the least useful thing
+ * on the screen — the phone's clock says it, and every row below is stamped
+ * with its own — so the largest text on the tab may as well push you into the
+ * session instead.
+ */
+const MOTIVATIONS = [
+  "Let's go!",
+  'Time to lift.',
+  'Show up again.',
+  'Make it count.',
+  'One more rep.',
+  'No zero days.',
+  'Beat last time.',
+  'Earn the rest.',
+  'Strong starts now.',
+  'Nobody lifts it for you.',
+];
+
+/* Rolled once per page load, not once per render: the idle Log rebuilds
+   whenever you come back to the tab or discard a session, and a line that
+   reshuffled underneath you would read as a glitch rather than a greeting. */
+let motivation = null;
+function motivationLine() {
+  if (motivation === null) motivation = MOTIVATIONS[Math.floor(Math.random() * MOTIVATIONS.length)];
+  return motivation;
+}
 
 function viewLog() {
   const session = activeSession();
@@ -181,12 +491,18 @@ function viewLog() {
     view.innerHTML = `
       ${hintHtml()}
       <p class="eyebrow">Today</p>
-      <h2 class="h-big">${esc(S.fmtDate(today, { weekday: 'long', day: 'numeric', month: 'short' }))}</h2>
+      <h2 class="h-big">${esc(motivationLine())}</h2>
       <p class="sub">${last
         ? `Last session ${esc(S.relativeDays(last.date))} — ${esc(summaryLine(last))}.`
         : 'No sessions logged yet. The first one sets your baseline.'}</p>
       <div style="height:18px"></div>
-      <button class="btn btn-primary btn-lg btn-block" data-act="start">Start session</button>
+      <button class="btn btn-primary btn-lg btn-block btn-stack" data-act="start">
+        <span class="bt">Start session</span>
+        <span class="bs">Pick exercises manually</span>
+      </button>
+      ${state.sessions.length ? '' : `
+        <button class="btn btn-block" style="margin-top:8px" data-act="load-demo">Load sample data</button>`}
+      ${routinePickerHtml()}
       ${todays.length ? `
         <h3 class="h-sec">Finished today</h3>
         <div class="rows">${todays.map(sessionRowHtml).join('')}</div>` : ''}
@@ -207,12 +523,54 @@ function viewLog() {
     <div style="height:16px"></div>
     <div data-entries>${(session.entries || []).map((e, i) => entryHtml(session, e, i)).join('')}</div>
     <button class="btn btn-block" data-act="pick-exercise">+ Add exercise</button>
+    ${saveRoutineBtnHtml(session)}
     <div class="field" style="margin-top:20px">
       <label for="snotes">Session notes</label>
       <textarea class="input" id="snotes" data-act="notes" placeholder="Felt strong, bar speed good…">${esc(session.notes || '')}</textarea>
     </div>
     <button class="btn btn-primary btn-block btn-lg" data-act="finish">Finish session</button>
     <button class="btn btn-quiet btn-block btn-sm" style="margin-top:8px" data-act="discard">Discard session</button>`;
+}
+
+/** Sits under "+ Add exercise": this list of exercises *is* the routine. */
+function saveRoutineBtnHtml(session) {
+  if (!(session.entries || []).length) return '';
+  return `<button class="btn btn-quiet btn-block btn-sm" style="margin-top:8px"
+    data-act="save-routine" data-id="${esc(session.id)}">Save as routine</button>`;
+}
+
+/** How many of a routine's exercises still exist, and a readable list. */
+function routineExercises(routine) {
+  return (routine.items || [])
+    .filter((it) => state.byId.has(it.exerciseId))
+    .map((it) => ({ ...it, ex: state.byId.get(it.exerciseId) }));
+}
+
+function routineSummary(routine) {
+  const live = routineExercises(routine);
+  if (!live.length) return 'No exercises left in this routine';
+  const sets = live.reduce((t, it) => t + (it.sets || 1), 0);
+  return `${live.length} exercise${live.length === 1 ? '' : 's'} · ${sets} set${sets === 1 ? '' : 's'}`;
+}
+
+/** The "start from a routine" block under the Start button on an idle Log. */
+function routinePickerHtml() {
+  if (!state.routines.length) return '';
+  const rows = state.routines.slice(0, 6).map((r) => `
+    <button class="row" data-act="start-routine" data-id="${esc(r.id)}">
+      <span class="grow">
+        <span class="t">${esc(r.name)}</span>
+        <span class="s">${esc(routineSummary(r))}</span>
+      </span>
+      <span class="r">${r.lastUsedAt
+        ? esc(S.relativeDays(S.localDate(new Date(r.lastUsedAt))))
+        : 'new'}</span>
+    </button>`).join('');
+  return `<h3 class="h-sec">Start from a routine</h3>
+    <div class="rows rows-accent">${rows}</div>
+    ${state.routines.length > 6
+      ? `<p class="meta" style="text-align:left;padding:8px 0 0"><a href="#/routines">All ${state.routines.length} routines</a></p>`
+      : ''}`;
 }
 
 function elapsed(session) {
@@ -246,6 +604,143 @@ function ghostHtml(session, entry) {
   if (!last) return `<div class="ghost">First time logging this</div>`;
   const w = last.weight > 0 ? `${S.fmtNum(last.weight)} ${unit()} × ${last.reps}` : `${last.reps} reps`;
   return `<div class="ghost">Last <b>${esc(w)}</b> · ${esc(S.relativeDays(last.date))}</div>`;
+}
+
+/* ---------------------------------------------------------- the boost */
+
+/** What each target means, in the Settings note under the dropdown. */
+const BOOST_NOTES = {
+  off: 'No target line. The Log shows only what you lifted last time.',
+  e1rm: 'Epley, weight × (1 + reps / 30), on your best set. Both more weight and more reps beat it, so the line offers each.',
+  weight: 'The heaviest single set you have done, whatever the reps. Beaten by one more notch of the weight step.',
+  reps: 'The most reps you have managed at the weight you are working at today, or heavier.',
+  volume: 'Σ weight × reps over the whole exercise in one session. Beaten by an extra set as readily as a heavier one.',
+};
+
+/**
+ * Per-exercise history with one session left out, memoised for the length of
+ * one render. The boost line wants it once per exercise card, and each rebuild
+ * walks every session ever logged.
+ *
+ * Nothing cached here depends on the excluded session — which is always the
+ * session being edited — so ticking a set cannot stale it. render() and
+ * reload() clear it anyway, which is the only invalidation that matters.
+ */
+const historyCache = new Map();
+
+function exHistory(exerciseId, excludeSessionId) {
+  const key = `${exerciseId} ${excludeSessionId || ''}`;
+  let hit = historyCache.get(key);
+  if (!hit) {
+    const list = excludeSessionId
+      ? state.sessions.filter((s) => s.id !== excludeSessionId)
+      : state.sessions;
+    hit = S.exerciseSeries(list, exerciseId);
+    historyCache.set(key, hit);
+  }
+  return hit;
+}
+
+/**
+ * The target for one exercise card: what to beat, and what it would take.
+ *
+ * A lift that has never carried a load is forced onto reps whatever the
+ * setting says — its e1RM, top weight and volume are all zero, and a target of
+ * zero is no target at all.
+ */
+function boostState(session, entry) {
+  if (S.boostMetric(state.settings.boostMetric).id === 'off') return null;
+  const series = exHistory(entry.exerciseId, session.id);
+  if (!series.length) return null;
+  const v = nextSetValues(session, entry);
+  const metricId = S.seriesIsBodyweight(series) ? 'reps' : state.settings.boostMetric;
+  const b = S.boostTarget(series, S.countedSets(entry), {
+    metricId, weight: v.weight, reps: v.reps, step: state.settings.weightStep,
+  });
+  if (b) b.streak = S.improvementStreak(series, metricId, v.weight);
+  return b;
+}
+
+/** A number in its metric's own terms: 96.0 kg, 9 reps, 1.2k kg. */
+function boostValue(b, n) {
+  const m = b.metric.id;
+  if (m === 'volume') return S.fmtVolume(n, unit());
+  if (m === 'reps') return `${S.fmtNum(n, 0)} reps`;
+  return `${S.fmtNum(n, m === 'e1rm' ? 1 : 0)} ${unit()}`;
+}
+
+/**
+ * The prescription as a headline figure plus its unit, for the Progress tile.
+ * Deliberately not the record itself — that number is already on the same
+ * screen, in the Personal records grid directly below.
+ */
+function boostHeadline(b) {
+  const m = b.metric.id;
+  if (m === 'e1rm') {
+    if (b.reps != null) return { v: `${S.fmtNum(b.atWeight)}×${b.reps}`, small: '' };
+    if (b.weight != null) return { v: `${S.fmtNum(b.weight)}×${b.atReps}`, small: '' };
+    return null;
+  }
+  if (m === 'weight') return b.weight != null ? { v: S.fmtNum(b.weight), small: unit() } : null;
+  if (m === 'reps') return b.reps != null ? { v: String(b.reps), small: 'reps' } : null;
+  return b.sets != null
+    ? { v: String(b.sets), small: `${b.sets === 1 ? 'set' : 'sets'} of ${b.atReps}` } : null;
+}
+
+/** What a cleared target actually beat — the all-time best outranks last time. */
+const beatenWhat = (b) => (b.current > b.best ? 'past your best' : 'past last time');
+
+/** The concrete ways to clear a target, as one phrase. */
+function boostWays(b) {
+  const m = b.metric.id;
+  if (m === 'e1rm') {
+    const ways = [];
+    if (b.reps != null) ways.push(`${S.fmtNum(b.atWeight)}×${b.reps}`);
+    // Only worth offering when it is actually a heavier bar than today's.
+    if (b.weight != null && b.weight > b.atWeight) ways.push(`${S.fmtNum(b.weight)}×${b.atReps}`);
+    return ways.join(' or ');
+  }
+  if (m === 'weight') return b.weight != null ? `try ${S.fmtNum(b.weight)}` : '';
+  if (m === 'reps') return b.reps != null ? `try ${b.reps}` : '';
+  return b.sets != null ? `${b.sets} more set${b.sets === 1 ? '' : 's'} of ${b.atReps}` : '';
+}
+
+/** The target as one line under the ghost. Empty but present, so it can be patched. */
+function boostHtml(session, entry) {
+  const b = boostState(session, entry);
+  if (!b) return `<div class="boost" data-boost hidden></div>`;
+  const tag = b.metric.id === 'e1rm' ? ' e1RM' : '';
+  let text;
+
+  if (b.achieved) {
+    text = `<b>${esc(boostValue(b, b.current))}</b>${tag} · ${beatenWhat(b)}`;
+  } else {
+    const at = b.metric.id === 'reps' && b.atWeight > 0
+      ? ` at ${esc(`${S.fmtNum(b.atWeight)} ${unit()}`)}` : '';
+    const ways = boostWays(b);
+    text = `Beat <b>${esc(boostValue(b, b.target))}</b>${tag}${at}${ways ? ` · ${esc(ways)}` : ''}`;
+  }
+
+  // One improvement spans two sessions, hence the +1.
+  const streak = b.streak >= 1 ? `<i>${b.streak + 1} sessions climbing</i>` : '';
+  return `<div class="boost${b.achieved ? ' is-hit' : ''}" data-boost>${text}${streak}</div>`;
+}
+
+function patchBoost(session, entry, entryEl) {
+  const el = entryEl && $('[data-boost]', entryEl);
+  if (el && entry) el.outerHTML = boostHtml(session, entry);
+}
+
+/**
+ * A set has just carried the exercise past its own target. The marker on the
+ * row is deliberately not persisted: it belongs to this moment, and the boost
+ * line above it carries the durable version of the same news.
+ */
+function celebrate(b, setEl) {
+  if (setEl) setEl.classList.add('is-pr');
+  if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+  toast(`${b.current > b.best ? 'New best' : 'Past last time'} — ${
+    boostValue(b, b.current)} ${b.metric.short}`.trim());
 }
 
 function setRowHtml(entry, set, si) {
@@ -285,15 +780,27 @@ function entryTitleHtml(entry) {
     </button></h3>`;
 }
 
+/** Column labels over the steppers, so a weight box never looks like a rep box. */
+function setHeadHtml() {
+  return `<div class="set-head" aria-hidden="true">
+    <span></span>
+    <span>${esc(unit().toUpperCase())}</span>
+    <span>Reps</span>
+    <span></span>
+  </div>`;
+}
+
 function entryHtml(session, entry, ei) {
   return `<section class="card" data-entry="${ei}">
     <div class="card-head">
       <div style="min-width:0">
         ${entryTitleHtml(entry)}
         ${ghostHtml(session, entry)}
+        ${boostHtml(session, entry)}
       </div>
       <button class="btn btn-sm btn-quiet" data-act="entry-menu" aria-label="Exercise options">•••</button>
     </div>
+    ${entry.sets.length ? setHeadHtml() : ''}
     <div class="sets">${entry.sets.map((s, i) => setRowHtml(entry, s, i)).join('')}</div>
     <div class="set-foot">
       <button class="btn btn-sm" data-act="add-set" style="flex:1">+ Set</button>
@@ -304,7 +811,7 @@ function entryHtml(session, entry, ei) {
 
 /* --------------------------------------------------------- log mutations */
 
-async function startSession() {
+async function newSession() {
   const now = new Date();
   const s = {
     id: uid('s'),
@@ -317,9 +824,69 @@ async function startSession() {
   await db.saveSession(s);
   state.sessions.unshift(s);
   state.activeId = s.id;
+  return s;
+}
+
+/**
+ * Nothing is written until an exercise is actually picked. Creating the session
+ * up front and *then* opening the picker meant any dismissal — scrim tap, a
+ * swipe of the handle, a change of mind — left an empty in-progress session
+ * holding the Log screen: no routine list, no Start button, and the only ways
+ * out were Discard or the "add to session" confirm, until reload() aged it out
+ * 18h later.
+ */
+async function startSession() {
+  pickExercise(async (exerciseId) => {
+    const session = activeSession() || await newSession();
+    await addExerciseToSession(session, exerciseId);
+    location.hash = '#/log';
+    render();
+  });
+}
+
+/** Open a session already filled in with a routine's exercises and sets. */
+async function startRoutine(routineId) {
+  const r = state.routines.find((x) => x.id === routineId);
+  if (!r) return;
+  const live = routineExercises(r);
+  if (!live.length) {
+    toast('Every exercise in that routine has been deleted');
+    return;
+  }
+  // Starting a routine mid-session would leave two sessions open at once, and
+  // reload() would then have to guess which one you meant. Fold into the open
+  // one instead.
+  const open = activeSession();
+  if (open) {
+    const ok = await confirmSheet({
+      title: 'Session already in progress',
+      body: `Add the ${live.length} exercise${live.length === 1 ? '' : 's'} from ${r.name} to the session you have open?`,
+      confirm: 'Add to session',
+    });
+    if (!ok) return;
+  }
+  const session = open || await newSession();
+
+  for (const it of live) {
+    let entry = session.entries.find((e) => e.exerciseId === it.exerciseId);
+    if (!entry) {
+      entry = { exerciseId: it.exerciseId, sets: [] };
+      session.entries.push(entry);
+    }
+    // Each set prefills from the one before it, exactly as tapping "+ Set" would.
+    for (let i = 0; i < setCountOf(it); i++) entry.sets.push(makeSet(session, entry));
+  }
+  await persist(session);
+
+  r.lastUsedAt = Date.now();
+  await db.saveRoutine(r);
+  state.routines = sortRoutines(state.routines);
+
+  const dropped = (r.items || []).length - live.length;
   location.hash = '#/log';
   render();
-  pickExercise();
+  toast(`${open ? 'Added' : 'Started'} ${r.name}${dropped
+    ? ` — ${dropped} deleted exercise${dropped === 1 ? '' : 's'} skipped` : ''}`);
 }
 
 /** New sets inherit from the previous set here, else from last time. */
@@ -334,15 +901,19 @@ function nextSetValues(session, entry) {
   return { weight: ex && ex.isBodyweight ? 0 : 20, reps: 8 };
 }
 
-async function addSet(session, entry, isWarmup = false) {
+function makeSet(session, entry, isWarmup = false) {
   const v = nextSetValues(session, entry);
-  entry.sets.push({
+  return {
     weight: isWarmup ? Math.round((v.weight * 0.5) / 2.5) * 2.5 : v.weight,
     reps: v.reps,
     rpe: null,
     isWarmup,
     done: false,
-  });
+  };
+}
+
+async function addSet(session, entry, isWarmup = false) {
+  entry.sets.push(makeSet(session, entry, isWarmup));
   await persist(session);
 }
 
@@ -441,19 +1012,21 @@ function viewSession(id) {
   }
   $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/history">Back</a>`;
   view.innerHTML = `
-    <p class="eyebrow">${session.endedAt ? 'Completed' : 'In progress'}${session.source === 'strongify' ? ' · imported' : ''}</p>
+    <p class="eyebrow">${session.endedAt ? 'Completed' : 'In progress'}${
+      session.source === 'strongify' ? ' · imported' : session.source === 'demo' ? ' · sample' : ''}</p>
     <h2 class="h-big">${esc(S.fmtDate(session.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</h2>
     <p class="sub">${esc(summaryLine(session))}</p>
     <div style="height:16px"></div>
     <div data-entries>${(session.entries || []).map((e, i) => entryHtml(session, e, i)).join('')}</div>
     <button class="btn btn-block" data-act="pick-exercise">+ Add exercise</button>
+    ${saveRoutineBtnHtml(session)}
     <div class="field" style="margin-top:20px">
       <label for="snotes">Session notes</label>
       <textarea class="input" id="snotes" data-act="notes" placeholder="Nothing noted">${esc(session.notes || '')}</textarea>
     </div>
     ${session.endedAt ? '' : `<button class="btn btn-primary btn-block" data-act="finish">Finish session</button>`}
     <button class="btn btn-danger btn-block btn-sm" style="margin-top:10px" data-act="delete-session">Delete this session</button>
-    <p class="meta">${esc(new Date(session.startedAt).toLocaleString())}</p>`;
+    <p class="meta">${esc(new Date(session.startedAt).toLocaleString(S.LOCALE))}</p>`;
 }
 
 /* ==========================================================================
@@ -477,7 +1050,7 @@ function viewHistory() {
   const blocks = [...groups.entries()].map(([month, list]) => {
     const vol = list.reduce((t, s) => t + S.sessionVolume(s), 0);
     const title = S.parseLocalDate(`${month}-01`)
-      .toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      .toLocaleDateString(S.LOCALE, { month: 'long', year: 'numeric' });
     return `<h3 class="h-sec">${esc(title)}
         <span style="float:right;font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:500">
           ${list.length} · ${esc(S.fmtVolume(vol, unit()))}</span></h3>
@@ -511,7 +1084,7 @@ function viewProgress() {
 function renderOverview(root) {
   if (!state.sessions.length) {
     root.innerHTML = `<div class="empty"><div class="glyph"></div><h3>No data yet</h3>
-      <p>Charts appear once you've logged a session. You can also import a backup from Data.</p>
+      <p>Charts appear once you've logged a session. You can also import a backup from Settings.</p>
       <a class="btn btn-primary" href="#/log">Start a session</a></div>`;
     return;
   }
@@ -563,15 +1136,63 @@ function renderOverview(root) {
         <span class="r">${days}<em>days</em></span>
       </button>`).join('')}</div>`;
 
-  barChart($('#c-sess'), buckets.map((b) => ({ label: b.label, value: b.sessions, sub: `week of ${b.label}` })), {
-    height: 140, highlightLast: true, integer: true,
+  barChart($('#c-sess'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: b.sessions, sub: `week of ${b.label}` })), {
+    height: 140, integer: true,
     format: (v) => `${v} session${v === 1 ? '' : 's'}`,
     tickFormat: (v) => String(Math.round(v)),
   });
-  barChart($('#c-vol'), buckets.map((b) => ({ label: b.label, value: Math.round(b.volume), sub: `week of ${b.label}` })), {
-    height: 150, highlightLast: true, format: (v) => S.fmtVolume(v, unit()),
+  barChart($('#c-vol'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: Math.round(b.volume), sub: `week of ${b.label}` })), {
+    height: 150, format: (v) => S.fmtVolume(v, unit()),
     tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))),
   });
+}
+
+/**
+ * The trend overlay for "Volume per session", as chosen in Data → Preferences.
+ * Returns null when the preference is off.
+ *
+ * The average runs over the exercise's whole history and is only then cut to
+ * the window on screen, so the line is already warmed up at the left edge
+ * instead of starting a few sessions in every time the window changes.
+ */
+function volumeTrend(full, series) {
+  const mode = S.maMode(state.settings.volumeTrend);
+  if (mode.id === 'off') return null;
+  const period = S.maPeriod(state.settings.volumeTrendPeriod);
+  const ma = S.movingAverage(full.map((p) => p.volume), period, mode.id);
+  const bySession = new Map(full.map((p, i) => [p.sessionId, ma[i]]));
+  const values = series.map((p) => (bySession.has(p.sessionId) ? bySession.get(p.sessionId) : null));
+  return {
+    label: `${mode.short} ${period}`,
+    period,
+    values,
+    // Fewer sessions than the average asks for: the label says so rather than
+    // leaving a switched-on setting looking broken.
+    ready: values.some((v) => v != null),
+  };
+}
+
+/**
+ * The Progress tab's version of the target. Nothing is in progress here, so it
+ * aims at the all-time best rather than at last session, and it also reports
+ * how long the number has stood and whether the exercise is climbing.
+ */
+function progressBoost(full, bodyweight) {
+  if (S.boostMetric(state.settings.boostMetric).id === 'off' || !full.length) return null;
+  const metricId = bodyweight ? 'reps' : state.settings.boostMetric;
+  const recent = full[full.length - 1];
+  const at = recent.topWeight;
+  const b = S.boostTarget(full, [], {
+    metricId, weight: at, reps: recent.topWeightReps || 1,
+    step: state.settings.weightStep, basis: 'best',
+  });
+  if (!b) return null;
+  b.streak = S.improvementStreak(full, metricId, at);
+  // The session that set the number now being chased.
+  const peak = full.reduce((m, p) => (S.metricOfSets(p.sets, metricId, at)
+    > S.metricOfSets(m.sets, metricId, at) ? p : m), full[0]);
+  b.stood = S.daysBetween(peak.date, S.localDate());
+  return b;
 }
 
 function renderExerciseProgress(root) {
@@ -591,6 +1212,9 @@ function renderExerciseProgress(root) {
   const series = S.filterWindow(full, state.progressWindow);
   const bodyweight = S.seriesIsBodyweight(full);
   const pr = S.personalRecords(full);
+  const trend = volumeTrend(full, series);
+  const boost = progressBoost(full, bodyweight);
+  const boostHead = boost ? boostHeadline(boost) : null;
 
   root.innerHTML = `
     <button class="btn btn-block" data-act="choose-progress-ex" style="justify-content:space-between">
@@ -610,14 +1234,35 @@ function renderExerciseProgress(root) {
       <div class="chart-wrap" id="c-1rm"></div>
     </div>
 
+    ${bodyweight ? '' : `<div class="card chart-card">
+      <div class="chart-head"><p class="eyebrow">Every set</p>
+        <span class="note">LINE REPS · BARS ${esc(unit().toUpperCase())}</span></div>
+      <div class="chart-wrap" id="c-sets"></div>
+    </div>`}
+
     <div class="card chart-card">
-      <div class="chart-head"><p class="eyebrow">Volume per session</p><span class="note">WARMUPS EXCLUDED</span></div>
+      <div class="chart-head"><p class="eyebrow">Volume per session</p>
+        <span class="note">${trend
+          ? esc(trend.ready ? `${trend.label} · WARMUPS OUT` : `${trend.label} · NEEDS ${trend.period}+`)
+          : 'WARMUPS EXCLUDED'}</span></div>
       <div class="chart-wrap" id="c-svol"></div>
     </div>
 
     ${bodyweight ? '' : `<div class="card chart-card">
       <div class="chart-head"><p class="eyebrow">Top set weight</p><span class="note">${esc(unit().toUpperCase())}</span></div>
       <div class="chart-wrap" id="c-top"></div>
+    </div>`}
+
+    ${!boostHead ? '' : `<h3 class="h-sec">Next target</h3>
+    <div class="stat accent next" style="margin-bottom:10px">
+      <span class="k">Next target · ${esc(boost.metric.short)}</span>
+      <span class="v">${esc(boostHead.v)}${boostHead.small
+        ? `<small>${esc(boostHead.small)}</small>` : ''}</span>
+      <span class="m">${esc([
+        `beats ${boostValue(boost, boost.target)}`,
+        `stood ${boost.stood} day${boost.stood === 1 ? '' : 's'}`,
+        boost.streak >= 1 ? `${boost.streak + 1} sessions climbing` : '',
+      ].filter(Boolean).join(' · '))}</span>
     </div>`}
 
     <h3 class="h-sec">Personal records</h3>
@@ -644,6 +1289,9 @@ function renderExerciseProgress(root) {
   // `label` is the tooltip text, `xlab` the short form printed on the axis.
   const label = (p) => S.fmtDate(p.date);
   const empty = 'No sessions in this window. Try a wider range.';
+  // Every chart here plots the same sessions on the same x scale, so they act
+  // as one figure: picking a session in any of them marks it in all of them.
+  const sync = 'progress-exercise';
 
   lineChart($('#c-1rm'),
     series.map((p) => ({
@@ -652,37 +1300,251 @@ function renderExerciseProgress(root) {
       label: label(p), xlab: label(p),
     })),
     { format: (v) => (bodyweight ? `${S.fmtNum(v, 0)} reps` : `${S.fmtNum(v, 1)} ${unit()}`),
-      tickFormat: (v) => S.fmtNum(v, 0), empty });
-
-  barChart($('#c-svol'),
-    series.map((p) => ({ label: label(p), value: Math.round(p.volume), sub: label(p) })),
-    { format: (v) => S.fmtVolume(v, unit()), height: 140, highlightLast: true,
-      tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty });
+      tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
 
   if (!bodyweight) {
+    setChart($('#c-sets'),
+      series.map((p) => ({ x: p.ts, label: label(p), sets: p.sets })),
+      { height: 190, format: (v) => `${S.fmtNum(v)} ${unit()}`,
+        weightFormat: (v) => S.fmtNum(v, 1), repFormat: (v) => String(Math.round(v)), empty, sync });
+  }
+
+  barChart($('#c-svol'),
+    series.map((p) => ({ x: p.ts, label: label(p), value: Math.round(p.volume), sub: label(p) })),
+    { format: (v) => S.fmtVolume(v, unit()), height: 140, valueLabel: 'Total',
+      overlay: trend && trend.ready ? { values: trend.values, label: trend.label } : null,
+      tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty, sync });
+
+  if (!bodyweight) {
+    // No date in the reading — the x tick under the point carries it, and all
+    // four charts read out the same session at once.
     lineChart($('#c-top'),
-      series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${label(p)} · ${p.topWeightReps} reps`, xlab: label(p) })),
-      { format: (v) => `${S.fmtNum(v)} ${unit()}`, tickFormat: (v) => S.fmtNum(v, 0), empty });
+      series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${p.topWeightReps} reps`, xlab: label(p) })),
+      { format: (v) => `${S.fmtNum(v)} ${unit()}`, tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
   }
 }
 
 /* ==========================================================================
-   VIEW: DATA & SETTINGS
+   EDITABLE OPTION LISTS
+
+   Rest timer, Weight step and Averaged over are dropdowns whose contents you
+   can change. All three work the same way: the stored setting holds one
+   chosen value plus the list of values on offer, the last entry of the select
+   is "Edit this list…", and choosing it opens the editor instead of picking
+   anything.
+
+   Every list passes through sanitize() on the way in and out, so a hand-edited
+   backup, a duplicate, or a value from the wrong unit cannot put a broken
+   choice in front of you.
    ========================================================================== */
 
-async function viewData() {
+const OPTION_MAX = 16;
+const OPTION_EDIT = '__edit';
+
+/** Seconds as something readable: 45s · 2 min · 1 min 15s. */
+function fmtSeconds(v) {
+  const n = Math.round(Number(v) || 0);
+  if (n < 60) return `${n}s`;
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return s ? `${m} min ${s}s` : `${m} min`;
+}
+
+const OPTION_LISTS = {
+  restTimerSeconds: {
+    key: 'restTimerOptions',
+    defaults: db.DEFAULT_REST_OPTIONS,
+    title: 'Rest timer values',
+    body: 'What the Rest timer dropdown offers. Anything from 5 seconds to an hour.',
+    addLabel: 'Add a value, in seconds',
+    placeholder: '75',
+    inputMode: 'numeric',
+    invalid: 'Enter a whole number of seconds between 5 and 3600.',
+    clean: (v) => {
+      const n = Math.round(Number(String(v).replace(',', '.')));
+      return isFinite(n) && n >= 5 && n <= 3600 ? n : null;
+    },
+    format: fmtSeconds,
+  },
+  weightStep: {
+    key: 'weightStepOptions',
+    defaults: db.DEFAULT_WEIGHT_STEPS,
+    title: 'Weight step values',
+    body: 'What one tap of − or + moves a weight by. Match it to the smallest plate pair you own.',
+    addLabel: () => `Add a value, in ${unit()}`,
+    placeholder: '1.25',
+    inputMode: 'decimal',
+    invalid: 'Enter a weight between 0.25 and 100.',
+    clean: (v) => {
+      const n = Math.round(Number(String(v).replace(',', '.')) * 100) / 100;
+      return isFinite(n) && n >= 0.25 && n <= 100 ? n : null;
+    },
+    // Not fmtNum: it pads to the requested places, and 2.50 kg beside 1 kg
+    // reads as a precision the plates do not have. clean() already rounded.
+    format: (v) => `${v} ${unit()}`,
+  },
+  volumeTrendPeriod: {
+    key: 'volumeTrendPeriodOptions',
+    defaults: db.DEFAULT_TREND_PERIODS,
+    title: 'Trend line lengths',
+    body: 'How many sessions the moving average is taken over. Nothing is drawn until you have that many, so a long average on a short history draws nothing at all.',
+    addLabel: 'Add a length, in sessions',
+    placeholder: '6',
+    inputMode: 'numeric',
+    invalid: `Enter a whole number of sessions between ${S.MA_PERIOD_MIN} and ${S.MA_PERIOD_MAX}.`,
+    clean: (v) => {
+      const n = Math.round(Number(String(v).replace(',', '.')));
+      return isFinite(n) && n >= S.MA_PERIOD_MIN && n <= S.MA_PERIOD_MAX ? n : null;
+    },
+    format: (v) => `${v} sessions`,
+  },
+};
+
+const optionLabel = (spec, field) =>
+  (typeof spec[field] === 'function' ? spec[field]() : spec[field]);
+
+/**
+ * A clean, sorted, de-duplicated list. `keep` is the value currently in use:
+ * it is added back if it is missing, because a setting you cannot see in its
+ * own dropdown reads as the app having forgotten it.
+ */
+function sanitizeOptions(spec, list, keep = null) {
+  const seen = new Set();
+  const out = [];
+  const add = (v) => {
+    const n = spec.clean(v);
+    if (n == null || seen.has(n)) return;
+    seen.add(n);
+    out.push(n);
+  };
+  (Array.isArray(list) ? list : []).forEach(add);
+  add(keep);
+  if (!out.length) spec.defaults.forEach(add);
+  out.sort((a, b) => a - b);
+  if (out.length <= OPTION_MAX) return out;
+  // Trim from the end, but never drop the value in use.
+  const kept = spec.clean(keep);
+  const cut = out.slice(0, OPTION_MAX);
+  if (kept != null && !cut.includes(kept)) cut[cut.length - 1] = kept;
+  return cut.sort((a, b) => a - b);
+}
+
+/** The offered values for a setting, always including the one in use. */
+function optionValues(id) {
+  const spec = OPTION_LISTS[id];
+  return sanitizeOptions(spec, state.settings[spec.key], state.settings[id]);
+}
+
+function optionSelectHtml(id, domId) {
+  const spec = OPTION_LISTS[id];
+  const current = spec.clean(state.settings[id]);
+  return `<select class="input" id="${domId}" data-pref="${id}" data-options="${id}">
+      ${optionValues(id).map((v) => `<option value="${v}"
+        ${v === current ? 'selected' : ''}>${esc(spec.format(v))}</option>`).join('')}
+      <option value="${OPTION_EDIT}">Edit this list…</option>
+    </select>`;
+}
+
+/** Write a list back, keeping the chosen value valid. */
+function saveOptions(id, values) {
+  const spec = OPTION_LISTS[id];
+  const list = sanitizeOptions(spec, values, null);
+  state.settings[spec.key] = list;
+  if (!list.includes(spec.clean(state.settings[id]))) {
+    // The value in use was just removed. Fall to its nearest neighbour rather
+    // than to a default, so a 2.5 kg step becomes 2 and not 2.5 again.
+    const cur = spec.clean(state.settings[id]);
+    state.settings[id] = list.reduce((best, v) =>
+      (Math.abs(v - cur) < Math.abs(best - cur) ? v : best), list[0]);
+  }
+  db.saveSettings(state.settings);
+  return list;
+}
+
+function editOptionsSheet(id) {
+  const spec = OPTION_LISTS[id];
+
+  const rowsHtml = (values) => values.map((v) => `
+    <div class="opt-row">
+      <span class="opt-v">${esc(spec.format(v))}</span>
+      ${values.length > 1
+        ? `<button class="btn btn-sm btn-quiet" data-rm="${v}"
+             aria-label="Remove ${esc(spec.format(v))}">Remove</button>`
+        : `<span class="opt-note">the last one</span>`}
+    </div>`).join('');
+
+  openSheet(`
+    <h2>${esc(spec.title)}</h2>
+    <p class="sub">${esc(spec.body)}</p>
+    <div class="opt-list" data-list>${rowsHtml(optionValues(id))}</div>
+    <div class="field" style="margin-top:14px">
+      <label for="opt-add">${esc(optionLabel(spec, 'addLabel'))}</label>
+      <div class="btn-row">
+        <input class="input" id="opt-add" inputmode="${spec.inputMode}"
+               enterkeyhint="done" autocomplete="off" placeholder="${esc(spec.placeholder)}">
+        <button class="btn" data-x="add" style="flex:0 0 auto">Add</button>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:4px">
+      <button class="btn btn-sm btn-quiet" data-x="reset">Reset to defaults</button>
+      <button class="btn btn-sm btn-primary" data-x="done">Done</button>
+    </div>`, (root) => {
+    const input = $('#opt-add', root);
+    const redraw = (values) => { $('[data-list]', root).innerHTML = rowsHtml(values); };
+
+    const add = () => {
+      const n = spec.clean(input.value);
+      if (n == null) { toast(spec.invalid); return; }
+      const values = optionValues(id);
+      if (values.includes(n)) { toast(`${spec.format(n)} is already in the list`); return; }
+      if (values.length >= OPTION_MAX) { toast(`That is as many as the list holds (${OPTION_MAX})`); return; }
+      redraw(saveOptions(id, values.concat([n])));
+      input.value = '';
+      toast(`Added ${spec.format(n)}`);
+    };
+
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+
+    root.addEventListener('click', (e) => {
+      const rm = e.target.closest('[data-rm]');
+      if (rm) {
+        const gone = Number(rm.dataset.rm);
+        redraw(saveOptions(id, optionValues(id).filter((v) => v !== gone)));
+        toast(`Removed ${spec.format(gone)}`);
+        return;
+      }
+      const b = e.target.closest('[data-x]');
+      if (!b) return;
+      if (b.dataset.x === 'add') add();
+      if (b.dataset.x === 'reset') {
+        redraw(saveOptions(id, spec.defaults.slice()));
+        toast('List reset');
+      }
+      if (b.dataset.x === 'done') { closeSheet(); render(); }
+    });
+  });
+}
+
+/* ==========================================================================
+   VIEW: SETTINGS  (was "Data" — same tab, same glyph)
+   ========================================================================== */
+
+async function viewSettings() {
   const est = await db.storageEstimate();
   const persisted = navigator.storage && navigator.storage.persisted
     ? await navigator.storage.persisted().catch(() => false) : false;
   const last = state.settings.lastExportAt;
   const daysSinceExport = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const trendMode = S.maMode(state.settings.volumeTrend);
+  const trendPeriod = S.maPeriod(state.settings.volumeTrendPeriod);
+  const boost = S.boostMetric(state.settings.boostMetric);
 
   $('#view').innerHTML = `
-    <p class="eyebrow">Data</p>
-    <h2 class="h-big">Your database</h2>
+    <p class="eyebrow">Settings</p>
+    <h2 class="h-big">Preferences &amp; data</h2>
     <p class="sub">${state.sessions.length} sessions · ${state.exercises.length} exercises · stored on this device only.</p>
 
-    ${daysSinceExport === null || daysSinceExport >= 30 ? `<div class="hint" style="margin-top:16px">
+    ${daysSinceExport === null || daysSinceExport >= EXPORT_NAG_DAYS ? `<div class="hint" style="margin-top:16px">
       <div><b>Export a backup.</b> ${daysSinceExport === null
         ? 'You have never exported. iOS can clear a site\'s storage on its own — a file in your Files app is the only real safety net.'
         : `Last export was ${daysSinceExport} days ago.`}</div></div>` : `<p class="meta" style="text-align:left;padding:14px 0 0">
@@ -692,9 +1554,27 @@ async function viewData() {
       <button class="btn btn-primary" data-act="export">Export backup</button>
       <button class="btn" data-act="import">Import backup</button>
     </div>
-    <button class="btn btn-block btn-sm" style="margin-top:8px" data-act="import-csv">Import Strongify CSV</button>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-sm" data-act="export-csv">Export CSV</button>
+      <button class="btn btn-sm" data-act="import-csv">Import CSV</button>
+      <button type="button" class="icon-btn" data-act="data-info" style="flex:0 0 auto"
+        aria-label="About export and import">${ICON_INFO}</button>
+    </div>
     <input type="file" id="file-json" accept=".json,application/json" hidden>
     <input type="file" id="file-csv" accept=".csv,text/csv,text/plain" hidden>
+
+    <h3 class="h-sec">Appearance</h3>
+    <div class="card card-pad">
+      <div class="field" style="margin-bottom:0">
+        <label for="p-theme">Theme</label>
+        <select class="input" id="p-theme" data-pref="theme">
+          ${THEMES.map((t) => `<option value="${t.id}"
+            ${state.settings.theme === t.id ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          The ${effectiveTheme() === 'dark' ? 'sun' : 'moon'} beside the wordmark flips it without coming here.</p>
+      </div>
+    </div>
 
     <h3 class="h-sec">Preferences</h3>
     <div class="card card-pad">
@@ -707,7 +1587,7 @@ async function viewData() {
       </div>
       <div class="field">
         <label for="p-wstep">Weight step</label>
-        <input class="input" id="p-wstep" data-pref="weightStep" inputmode="decimal" value="${state.settings.weightStep}">
+        ${optionSelectHtml('weightStep', 'p-wstep')}
       </div>
       <div class="field">
         <label for="p-rstep">Rep step</label>
@@ -715,10 +1595,7 @@ async function viewData() {
       </div>
       <div class="field">
         <label for="p-rest">Rest timer</label>
-        <select class="input" id="p-rest" data-pref="restTimerSeconds">
-          ${[60, 90, 120, 150, 180, 240, 300].map((v) => `<option value="${v}"
-            ${Number(state.settings.restTimerSeconds) === v ? 'selected' : ''}>${v / 60 >= 1 ? `${v / 60} min` : `${v}s`}</option>`).join('')}
-        </select>
+        ${optionSelectHtml('restTimerSeconds', 'p-rest')}
       </div>
       <div class="field" style="margin-bottom:0">
         <label for="p-auto">Start rest timer automatically</label>
@@ -726,8 +1603,48 @@ async function viewData() {
           <option value="yes" ${state.settings.restTimerAuto ? 'selected' : ''}>Yes, when I mark a set done</option>
           <option value="no" ${!state.settings.restTimerAuto ? 'selected' : ''}>No, never</option>
         </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          Weight step and Rest timer end in “Edit this list…”, where you can add
+          or remove the values they offer. So does Averaged over, below.</p>
       </div>
     </div>
+
+    <h3 class="h-sec">Motivation</h3>
+    <div class="card card-pad">
+      <div class="field" style="margin-bottom:0">
+        <label for="p-boost">Target to beat</label>
+        <select class="input" id="p-boost" data-pref="boostMetric">
+          ${S.BOOST_METRICS.map((m) => `<option value="${m.id}"
+            ${boost.id === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">${esc(BOOST_NOTES[boost.id])}</p>
+      </div>
+    </div>
+
+    <h3 class="h-sec">Plot settings</h3>
+    <div class="card card-pad">
+      <div class="field" ${trendMode.id === 'off' ? 'style="margin-bottom:0"' : ''}>
+        <label for="p-trend">Volume trend line</label>
+        <select class="input" id="p-trend" data-pref="volumeTrend">
+          ${S.MA_MODES.map((m) => `<option value="${m.id}"
+            ${trendMode.id === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          Drawn over Volume per session in Progress → Per exercise.</p>
+      </div>
+      ${trendMode.id === 'off' ? '' : `<div class="field" style="margin-bottom:0">
+        <label for="p-trend-n">Averaged over</label>
+        ${optionSelectHtml('volumeTrendPeriod', 'p-trend-n')}
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          ${esc(trendMode.id === 'ema'
+            ? `Each session weighted 2/(${trendPeriod}+1), seeded with the plain average of the first ${trendPeriod}.`
+            : `The mean of every ${trendPeriod} consecutive sessions. Nothing is drawn until there are ${trendPeriod}.`)}</p>
+      </div>`}
+    </div>
+
+    <h3 class="h-sec">Routines</h3>
+    <a class="btn btn-block" href="#/routines">Manage routines${state.routines.length
+      ? ` <span style="color:var(--mist)">· ${state.routines.length}</span>` : ''}</a>
 
     <h3 class="h-sec">Exercises</h3>
     <a class="btn btn-block" href="#/exercises">Manage exercise list</a>
@@ -742,9 +1659,28 @@ async function viewData() {
         ${(est.usage / 1048576).toFixed(2)} MB used${est.quota ? ` of ${(est.quota / 1048576).toFixed(0)} MB available` : ''}</p>` : ''}
     </div>
 
+    <h3 class="h-sec">App</h3>
+    <div class="btn-row">
+      <button class="btn" data-act="reload-app">Reload app</button>
+      <button class="btn" data-act="check-update">Check for update</button>
+    </div>
+    <button class="btn btn-block btn-sm" style="margin-top:8px" data-act="clear-cache">Clear offline cache</button>
+    <p class="meta" style="text-align:left;padding:6px 0 0">
+      Reload app reopens the page as it is right now. Check for update asks the
+      server for a newer version; if one exists it installs quietly in the
+      background and offers a “Reload” toast to switch to it. Clear offline
+      cache throws away every stored copy of the app and fetches it again — for
+      when the files moved but the version did not. None of the three touch
+      your sessions.</p>
+
     <hr class="sep">
+    ${hasDemoData() ? `
+      <button class="btn btn-danger btn-block btn-sm" style="margin-bottom:10px"
+        data-act="remove-demo">Remove sample data</button>` : ''}
     <button class="btn btn-danger btn-block" data-act="erase">Erase all data</button>
-    <p class="meta">flexloop · schema v${db.SCHEMA_VERSION} · offline</p>`;
+    <p class="meta">flexloop ·
+      <button type="button" class="linkish" data-act="version">${esc(VERSION_SHORT)}</button>
+      · offline</p>`;
 }
 
 function viewExercises() {
@@ -752,7 +1688,7 @@ function viewExercises() {
   for (const s of state.sessions) {
     for (const e of s.entries || []) counts.set(e.exerciseId, (counts.get(e.exerciseId) || 0) + 1);
   }
-  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/data">Back</a>`;
+  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/settings">Back</a>`;
   $('#view').innerHTML = `
     <p class="eyebrow">Exercises</p>
     <h2 class="h-big">${state.exercises.length} in your list</h2>
@@ -816,24 +1752,202 @@ function editExerciseSheet(id) {
 }
 
 /* ==========================================================================
+   VIEW: ROUTINES
+
+   A routine is an ordered exercise list with a set count each. It stores no
+   weights on purpose — sets prefill from the last time you trained the
+   exercise, so a stored target would only go stale.
+   ========================================================================== */
+
+const routineById = (id) => state.routines.find((r) => r.id === id) || null;
+
+/** Set counts are clamped: a routine is a plan, not a place to store 40 sets. */
+const setCountOf = (item) => Math.max(1, Math.min(12, Math.round(Number(item && item.sets) || 1)));
+
+async function saveRoutine(r) {
+  r.updatedAt = Date.now();
+  await db.saveRoutine(r);
+  state.routines = sortRoutines(state.routines);
+}
+
+function viewRoutines() {
+  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/settings">Back</a>`;
+  const rows = state.routines.map((r) => `
+    <button class="row" data-act="open-routine" data-id="${esc(r.id)}">
+      <span class="grow">
+        <span class="t">${esc(r.name)}</span>
+        <span class="s">${esc(routineSummary(r))}</span>
+      </span>
+      <span class="r">${r.lastUsedAt
+        ? esc(S.relativeDays(S.localDate(new Date(r.lastUsedAt))))
+        : 'new'}</span>
+    </button>`).join('');
+
+  $('#view').innerHTML = `
+    <p class="eyebrow">Routines</p>
+    <h2 class="h-big">${state.routines.length} saved</h2>
+    <p class="sub">An ordered list of exercises. Starting one opens a session with
+      every set already laid out, prefilled from the last time you trained it.</p>
+    <div style="height:14px"></div>
+    <button class="btn btn-block" data-act="new-routine">+ New routine</button>
+    ${state.routines.length ? `<div style="height:12px"></div><div class="rows">${rows}</div>`
+      : `<div class="empty"><div class="glyph"></div><h3>No routines yet</h3>
+         <p>Build one here, or tap “Save as routine” at the bottom of any session
+            to keep the exercises you just did.</p></div>`}`;
+}
+
+function viewRoutine(id) {
+  const r = routineById(id);
+  const view = $('#view');
+  if (!r) {
+    view.innerHTML = `<div class="empty"><div class="glyph"></div><h3>Routine not found</h3>
+      <p>It may have been deleted.</p><a class="btn" href="#/routines">Back to routines</a></div>`;
+    return;
+  }
+  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/routines">Back</a>`;
+  const items = r.items || [];
+  const missing = items.filter((it) => !state.byId.has(it.exerciseId)).length;
+
+  view.innerHTML = `
+    <p class="eyebrow">Routine</p>
+    <h2 class="h-big">${esc(r.name)}</h2>
+    <p class="sub">${esc(routineSummary(r))}${missing
+      ? ` · ${missing} deleted exercise${missing === 1 ? '' : 's'}, skipped on start` : ''}</p>
+    <div style="height:14px"></div>
+
+    ${items.length ? `<div class="rt-list">${items.map((it, i) => {
+      const ex = state.byId.get(it.exerciseId);
+      return `<div class="rt-item" data-i="${i}">
+        <span class="rt-name${ex ? '' : ' is-gone'}">${esc(ex ? ex.name : 'Removed exercise')}</span>
+        <span class="rt-sets">
+          <button class="step" data-act="routine-sets" data-d="-1" aria-label="Fewer sets">−</button>
+          <span class="rt-n">${setCountOf(it)}<em>sets</em></span>
+          <button class="step" data-act="routine-sets" data-d="1" aria-label="More sets">+</button>
+        </span>
+        <button class="btn btn-sm btn-quiet" data-act="routine-item-menu" aria-label="Options">•••</button>
+      </div>`;
+    }).join('')}</div>` : `<div class="empty" style="padding:26px 10px">
+      <p style="margin:0">Nothing in this routine yet.</p></div>`}
+
+    <button class="btn btn-block" data-act="routine-add">+ Add exercise</button>
+    <div style="height:18px"></div>
+    <button class="btn btn-primary btn-block btn-lg" data-act="start-routine" data-id="${esc(r.id)}">
+      Start this routine</button>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn btn-sm" data-act="rename-routine" data-id="${esc(r.id)}">Rename</button>
+      <button class="btn btn-sm btn-danger" data-act="delete-routine" data-id="${esc(r.id)}">Delete</button>
+    </div>`;
+}
+
+/** The item index a control inside the routine editor belongs to. */
+function routineItemIndex(el) {
+  const row = el.closest('[data-i]');
+  return row ? Number(row.dataset.i) : -1;
+}
+
+function routineItemMenu(r, i) {
+  const it = r.items[i];
+  const ex = state.byId.get(it.exerciseId);
+  openSheet(`
+    <h2>${esc(ex ? ex.name : 'Removed exercise')}</h2>
+    <p class="sub">${setCountOf(it)} set${setCountOf(it) === 1 ? '' : 's'} · position ${i + 1} of ${r.items.length}</p>
+    <div class="rows" style="margin-top:14px">
+      <button class="row" data-x="up"><span class="grow"><span class="t">Move up</span></span></button>
+      <button class="row" data-x="down"><span class="grow"><span class="t">Move down</span></span></button>
+      <button class="row" data-x="rm"><span class="grow"><span class="t" style="color:var(--danger)">Remove from routine</span>
+        <span class="s">The exercise itself is untouched</span></span></button>
+    </div>`, (root) => {
+    root.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-x]');
+      if (!b) return;
+      const list = r.items;
+      if (b.dataset.x === 'up' && i > 0) list.splice(i - 1, 0, list.splice(i, 1)[0]);
+      if (b.dataset.x === 'down' && i < list.length - 1) list.splice(i + 1, 0, list.splice(i, 1)[0]);
+      if (b.dataset.x === 'rm') list.splice(i, 1);
+      await saveRoutine(r);
+      closeSheet();
+      render();
+    });
+  });
+}
+
+/** Turn the exercises of a session into a routine. */
+async function saveSessionAsRoutine(session) {
+  const items = (session.entries || [])
+    .filter((e) => state.byId.has(e.exerciseId))
+    .map((e) => ({
+      exerciseId: e.exerciseId,
+      // Warmups are per-day, not part of the plan.
+      sets: Math.max(1, e.sets.filter((s) => !s.isWarmup).length),
+    }));
+  if (!items.length) {
+    toast('Nothing to save — every exercise here has been deleted');
+    return;
+  }
+  // Guess a name from the muscle group that dominates the session.
+  const tally = new Map();
+  for (const it of items) {
+    const g = (state.byId.get(it.exerciseId).muscleGroup || '').trim();
+    if (g && g !== 'Uncategorised') tally.set(g, (tally.get(g) || 0) + 1);
+  }
+  const suggested = [...tally.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)[0] || '';
+
+  const name = await promptSheet({
+    title: 'Save as routine',
+    body: `${items.length} exercise${items.length === 1 ? '' : 's'}, with the working sets you did today.`,
+    label: 'Routine name',
+    value: suggested,
+    placeholder: 'Push A, Legs, Upper…',
+  });
+  if (!name) return;
+
+  const r = { id: uid('r'), name, items, createdAt: Date.now(), updatedAt: Date.now(), lastUsedAt: null };
+  await db.saveRoutine(r);
+  state.routines = sortRoutines(state.routines.concat([r]));
+  toast(`Saved routine ${r.name}`, 'Edit', () => { location.hash = `#/routine/${r.id}`; });
+}
+
+/* ==========================================================================
    EXPORT / IMPORT
    ========================================================================== */
 
-async function doExport() {
-  const data = await db.exportAll();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
+/** Hand a string to the browser as a file. The only way out of this app. */
+function download(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = `flexloop-${S.localDate()}.json`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function doExport() {
+  const data = await db.exportAll();
+  download(`flexloop-${S.localDate()}.json`, JSON.stringify(data, null, 2), 'application/json');
   state.settings.lastExportAt = Date.now();
   db.saveSettings(state.settings);
   toast(`Exported ${data.sessions.length} sessions`);
   render();
+}
+
+/**
+ * CSV is the interchange format, not a backup: it carries working sets and
+ * nothing else. lastExportAt is deliberately left alone — the nag exists
+ * because the .json is the only complete copy, and a lossy file must not
+ * silence it.
+ */
+async function doExportCsv() {
+  const data = await db.exportAll();
+  const csv = toStrongifyCsv({
+    sessions: data.sessions,
+    exercises: data.exercises,
+    appVersion: APP_VERSION,
+  });
+  download(`flexloop-${S.localDate()}.csv`, csv, 'text/csv');
+  const rows = csv.split('\n').length - 2; // less the header and trailing newline
+  toast(`Exported ${rows} sets`);
 }
 
 function readFile(input) {
@@ -852,17 +1966,20 @@ async function doImportJson(input) {
     const { text } = await readFile(input);
     const data = JSON.parse(text);
     db.validateBackup(data);
-    const ok = await confirmSheet({
-      title: 'Replace everything?',
-      body: `This backup holds ${data.sessions.length} sessions and ${data.exercises.length} exercises. Importing replaces what is on this device now.`,
-      confirm: 'Replace', danger: true,
+    const nRoutines = Array.isArray(data.routines) ? data.routines.length : 0;
+    const mode = await chooseImportModeSheet({
+      title: 'Merge or replace?',
+      body: `This backup holds ${data.sessions.length} sessions, ${data.exercises.length} exercises${
+        nRoutines ? ` and ${nRoutines} routine${nRoutines === 1 ? '' : 's'}` : ''
+      }. Merge adds them to what is here and leaves your settings alone. Replace wipes this device first, settings included. Either way the file wins where the two hold the same session.`,
     });
-    if (!ok) return;
-    const res = await db.importAll(data, 'replace');
+    if (!mode) return;
+    const res = await db.importAll(data, mode);
+    // Harmless re-read after a merge, which never writes settings.
     state.settings = db.loadSettings();
     await reload();
     render();
-    toast(`Restored ${res.sessions} sessions`);
+    toast(`${mode === 'merge' ? 'Merged' : 'Restored'} ${res.sessions} sessions`);
   } catch (err) {
     toast(err.message || 'Import failed.', null, null, 5000);
   } finally {
@@ -876,7 +1993,7 @@ async function doImportCsv(input) {
     if (!looksLikeStrongify(text)) {
       const cont = await confirmSheet({
         title: 'Unfamiliar CSV',
-        body: 'This does not look like a Strongify export. flexloop will try to read it as one anyway.',
+        body: 'No Exercise Name or Routine Name header in this file. flexloop will read it in the usual column order anyway.',
         confirm: 'Try anyway',
       });
       if (!cont) return;
@@ -898,6 +2015,59 @@ async function doImportCsv(input) {
   } finally {
     input.value = '';
   }
+}
+
+/* ------------------------------------------------------------ sample data */
+
+/** True while the sample dataset is on the device. Gates both its buttons. */
+const hasDemoData = () => state.sessions.some((s) => s.source === 'demo');
+
+async function loadDemoData() {
+  const data = buildDemoData({ unit: state.settings.unit });
+  const ok = await confirmSheet({
+    title: 'Load sample data?',
+    body: `${data.sessions.length} example sessions across six months, with ${data.exercises.length} exercises and ${data.routines.length} routines. Your settings are untouched, and Settings can remove all of it again.`,
+    confirm: 'Load it',
+  });
+  if (!ok) return;
+  const res = await db.importAll(data, 'merge');
+  await reload();
+  render();
+  toast(`Loaded ${res.sessions} sample sessions`);
+}
+
+/**
+ * The mirror of loadDemoData. Sessions and routines go by their id prefix,
+ * but an exercise is kept if any real session still uses it — otherwise
+ * logging one set against a sample lift and then removing the samples would
+ * leave that session reading "Removed exercise".
+ */
+async function removeDemoData() {
+  const doomed = state.sessions.filter((s) => s.source === 'demo');
+  const ok = await confirmSheet({
+    title: 'Remove sample data?',
+    body: `Deletes the ${doomed.length} sample sessions and their routines. Anything you logged yourself stays, along with any sample exercise you have since used.`,
+    confirm: 'Remove', danger: true,
+  });
+  if (!ok) return;
+
+  const keptIds = new Set();
+  for (const s of state.sessions) {
+    if (s.source === 'demo') continue;
+    for (const e of s.entries || []) keptIds.add(e.exerciseId);
+  }
+
+  await Promise.all([
+    ...doomed.map((s) => db.deleteSession(s.id)),
+    ...state.routines.filter((r) => isDemoRoutine(r.id)).map((r) => db.deleteRoutine(r.id)),
+    ...state.exercises
+      .filter((ex) => isDemoExercise(ex.id) && !keptIds.has(ex.id))
+      .map((ex) => db.deleteExercise(ex.id)),
+  ]);
+
+  await reload();
+  render();
+  toast(`Removed ${doomed.length} sample sessions`);
 }
 
 /* ==========================================================================
@@ -1001,11 +2171,22 @@ document.addEventListener('click', async (e) => {
       break;
 
     case 'add-set':
-    case 'add-warmup':
+    case 'add-warmup': {
       if (!c.entry) return;
+      const wasEmpty = c.entry.sets.length === 0;
       await addSet(c.session, c.entry, act === 'add-warmup');
-      render();
+      // Sets are always appended, so every existing data-set index still points
+      // where it did and the row can go in beside them — no full render, which
+      // would flicker the card and recompute every session's history.
+      const list = $('.sets', c.entryEl);
+      if (!list) { render(); break; }
+      const si = c.entry.sets.length - 1;
+      if (wasEmpty) list.insertAdjacentHTML('beforebegin', setHeadHtml());
+      list.insertAdjacentHTML('beforeend', setRowHtml(c.entry, c.entry.sets[si], si));
+      patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
       break;
+    }
 
     case 'step': {
       if (!c.set) return;
@@ -1018,16 +2199,24 @@ document.addEventListener('click', async (e) => {
       if (input) input.value = f === 'weight' ? S.fmtNum(next) : String(next);
       await persist(c.session);
       patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
       break;
     }
 
     case 'done': {
       if (!c.set) return;
+      // The target as it stood before this set counted, so that clearing it is
+      // an event rather than a state — untick and retick, and it fires again.
+      const before = boostState(c.session, c.entry);
       c.set.done = !c.set.done;
       btn.setAttribute('aria-pressed', c.set.done ? 'true' : 'false');
       c.setEl.classList.toggle('is-done', c.set.done);
+      if (!c.set.done) c.setEl.classList.remove('is-pr');
       await persist(c.session);
       patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
+      const after = c.set.done ? boostState(c.session, c.entry) : null;
+      if (after && after.achieved && before && !before.achieved) celebrate(after, c.setEl);
       if (c.set.done && state.settings.restTimerAuto && !c.set.isWarmup) {
         startRest(state.settings.restTimerSeconds);
       }
@@ -1108,22 +2297,179 @@ document.addEventListener('click', async (e) => {
       editExerciseSheet(btn.dataset.id);
       break;
 
+    /* ---------------------------------------------------------- routines */
+
+    case 'start-routine':
+      await startRoutine(btn.dataset.id);
+      break;
+
+    case 'open-routine':
+      location.hash = `#/routine/${btn.dataset.id}`;
+      break;
+
+    case 'save-routine':
+      await saveSessionAsRoutine(sessionById(btn.dataset.id) || c.session);
+      break;
+
+    case 'new-routine': {
+      const name = await promptSheet({
+        title: 'New routine',
+        label: 'Routine name',
+        placeholder: 'Push A, Legs, Upper…',
+        confirm: 'Create',
+      });
+      if (!name) return;
+      const r = { id: uid('r'), name, items: [], createdAt: Date.now(), updatedAt: Date.now(), lastUsedAt: null };
+      await db.saveRoutine(r);
+      state.routines = sortRoutines(state.routines.concat([r]));
+      location.hash = `#/routine/${r.id}`;
+      break;
+    }
+
+    case 'rename-routine': {
+      const r = routineById(btn.dataset.id);
+      if (!r) return;
+      const name = await promptSheet({
+        title: 'Rename routine', label: 'Routine name', value: r.name,
+      });
+      if (!name) return;
+      r.name = name;
+      await saveRoutine(r);
+      render();
+      break;
+    }
+
+    case 'delete-routine': {
+      const r = routineById(btn.dataset.id);
+      if (!r) return;
+      const ok = await confirmSheet({
+        title: `Delete ${r.name}?`,
+        body: 'The routine is removed. Sessions you already logged from it are untouched.',
+        confirm: 'Delete', danger: true,
+      });
+      if (!ok) return;
+      await db.deleteRoutine(r.id);
+      state.routines = state.routines.filter((x) => x.id !== r.id);
+      location.hash = '#/routines';
+      toast('Routine deleted');
+      break;
+    }
+
+    case 'routine-add': {
+      const r = routineById(location.hash.replace('#/routine/', ''));
+      if (!r) return;
+      pickExercise(async (exerciseId) => {
+        r.items = (r.items || []).concat([{ exerciseId, sets: 3 }]);
+        await saveRoutine(r);
+        closeSheet();
+        render();
+      });
+      break;
+    }
+
+    case 'routine-sets': {
+      const r = routineById(location.hash.replace('#/routine/', ''));
+      const i = routineItemIndex(btn);
+      if (!r || i < 0) return;
+      const it = r.items[i];
+      it.sets = Math.max(1, Math.min(12, setCountOf(it) + Number(btn.dataset.d)));
+      // Patch the one number in place; a full render would drop the scroll position.
+      const out = $('.rt-n', btn.closest('[data-i]'));
+      if (out) out.innerHTML = `${it.sets}<em>sets</em>`;
+      await saveRoutine(r);
+      break;
+    }
+
+    case 'routine-item-menu': {
+      const r = routineById(location.hash.replace('#/routine/', ''));
+      const i = routineItemIndex(btn);
+      if (r && i >= 0) routineItemMenu(r, i);
+      break;
+    }
+
     case 'export':      doExport(); break;
+    case 'export-csv':  doExportCsv(); break;
     case 'import':      $('#file-json').click(); break;
     case 'import-csv':  $('#file-csv').click(); break;
+    case 'data-info':   dataFormatSheet(); break;
+    case 'load-demo':   loadDemoData(); break;
+    case 'remove-demo': removeDemoData(); break;
 
     case 'erase': {
       const ok = await confirmSheet({
         title: 'Erase everything?',
-        body: 'Every session, exercise and setting on this device is deleted. Export first if you might want any of it back.',
+        body: 'Every session, exercise, routine and setting on this device is deleted. Export first if you might want any of it back.',
         confirm: 'Erase everything', danger: true,
       });
       if (!ok) return;
       await db.clear(db.STORE_SE);
       await db.clear(db.STORE_EX);
+      await db.clear(db.STORE_RO);
       await reload();
       render();
       toast('All data erased');
+      break;
+    }
+
+    case 'info':
+      infoSheet();
+      break;
+
+    case 'version':
+      versionSheet();
+      break;
+
+    case 'theme':
+      // An explicit tap leaves "match system" behind — you have just said which
+      // one you want, and following the system would undo it at sunset.
+      setTheme(effectiveTheme() === 'dark' ? 'light' : 'dark');
+      if (currentTab() === 'settings') render();
+      break;
+
+    case 'reload-app':
+      location.reload();
+      break;
+
+    case 'check-update': {
+      if (!('serviceWorker' in navigator)) { toast('Service worker not supported'); break; }
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) { toast('Service worker not registered'); break; }
+      try {
+        await reg.update();
+      } catch (err) {
+        toast('Could not check for updates');
+        break;
+      }
+      // If a new worker isn't installing/waiting, the byte-for-byte check
+      // found nothing new. Otherwise the updatefound/controllerchange
+      // listeners in registerSW() take it from here and surface their own
+      // "Update ready" toast once the new worker has taken control.
+      if (!reg.installing && !reg.waiting) toast(`Already on the latest version (${VERSION_SHORT})`);
+      break;
+    }
+
+    // Check for update only notices a changed sw.js. Redeploy the same version
+    // over itself and the worker is byte-identical, so nothing is found and the
+    // old shell keeps being served. Emptying the cache is the way out: the
+    // active worker misses on every request afterwards and refills from the
+    // network, which is also why this needs a connection to be worth doing.
+    case 'clear-cache': {
+      if (!('caches' in window)) { toast('Cache storage not supported'); break; }
+      if (navigator.onLine === false) { toast('Go online first — the app refetches itself'); break; }
+      const ok = await confirmSheet({
+        title: 'Clear the offline cache?',
+        body: 'Every stored copy of the app is deleted and fetched again on the next load. Your sessions, exercises, routines and settings are not touched. Needs a connection.',
+        confirm: 'Clear and reload', danger: true,
+      });
+      if (!ok) return;
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      } catch (err) {
+        toast('Could not clear the cache');
+        break;
+      }
+      location.reload();
       break;
     }
 
@@ -1155,7 +2501,11 @@ $('#view').addEventListener('input', (e) => {
     const n = el.dataset.f === 'reps' ? parseInt(raw, 10) : parseFloat(raw);
     c.set[el.dataset.f] = isFinite(n) && n >= 0 ? n : 0;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { persist(c.session); patchSummary(c.session); }, 350);
+    saveTimer = setTimeout(() => {
+      persist(c.session);
+      patchSummary(c.session);
+      patchBoost(c.session, c.entry, c.entryEl);
+    }, 350);
   } else if (el.dataset.act === 'notes') {
     const c = ctx(el);
     if (!c.session) return;
@@ -1174,17 +2524,37 @@ $('#view').addEventListener('change', async (e) => {
     el.value = el.dataset.f === 'weight' ? S.fmtNum(c.set.weight) : String(c.set.reps);
     await persist(c.session);
     patchSummary(c.session);
+    patchBoost(c.session, c.entry, c.entryEl);
   } else if (el.dataset.pref) {
     const key = el.dataset.pref;
+    // "Edit this list…" is a door, not a value: put the select back where it
+    // was and open the editor. Committing it would store the sentinel.
+    if (el.dataset.options && el.value === OPTION_EDIT) {
+      const spec = OPTION_LISTS[key];
+      const cur = spec.clean(state.settings[key]);
+      el.value = cur == null ? String(spec.defaults[0]) : String(cur);
+      editOptionsSheet(key);
+      return;
+    }
     let v = el.value;
     if (key === 'restTimerAuto') v = v === 'yes';
-    else if (key === 'weightStep') v = Math.max(0.25, parseFloat(v.replace(',', '.')) || 2.5);
-    else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
-    else if (key === 'restTimerSeconds') v = parseInt(v, 10) || 120;
+    else if (OPTION_LISTS[key]) {
+      const n = OPTION_LISTS[key].clean(v);
+      v = n == null ? state.settings[key] : n;
+    } else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
+    else if (key === 'volumeTrend') v = S.maMode(v).id;
+    else if (key === 'boostMetric') v = S.boostMetric(v).id;
+    else if (key === 'theme') v = THEMES.some((t) => t.id === v) ? v : 'dark';
     state.settings[key] = v;
     db.saveSettings(state.settings);
+    if (key === 'theme') applyTheme();
     toast('Preference saved');
-    if (key === 'unit') render();
+    // Some of these change what the rest of the screen says: the unit relabels
+    // the weight steps, turning the trend off hides its length select, the
+    // theme decides which glyph the note beside it names, and each target
+    // metric explains itself differently.
+    if (key === 'unit' || key === 'theme' || key === 'volumeTrend'
+      || key === 'volumeTrendPeriod' || key === 'boostMetric') render();
   }
 });
 
@@ -1214,6 +2584,164 @@ $('#view').addEventListener('pointermove', (e) => {
 }, { passive: true });
 ['pointerup', 'pointercancel', 'scroll'].forEach((ev) =>
   $('#view').addEventListener(ev, () => { clearTimeout(pressTimer); pressOrigin = null; }, { passive: true }));
+
+/**
+ * The topbar (i). One entry per tab: it explains the screen you are looking
+ * at, since a single sheet covering the whole app would be four screens of
+ * text to find one paragraph in.
+ *
+ * Every string is escaped on the way out, so these are plain text only.
+ */
+const INFO = {
+  log: {
+    title: 'the Log',
+    sub: 'The +/− steppers and the checkmark cover adding and finishing a set. Everything else lives behind a long-press.',
+    items: [
+      ['Long-press a set row',
+       "Opens a menu to mark it a warmup, duplicate it, or delete it. There's no swipe or edit button — deleting a set is always this."],
+      ['Tap the weight or reps number',
+       'Type a value directly instead of stepping to it. One tap of − or + moves it by the weight step and rep step set in Settings.'],
+      ['Tap ••• on an exercise card',
+       'Mark every set in it done at once, move it up or down, or remove it from this session — the exercise itself is untouched.'],
+      ["Tap an exercise's name",
+       'Jumps to its chart on Progress → Per exercise.'],
+      ['The dim line under each name',
+       'The ghost: what you lifted last time, so you never have to go looking for it. New sets prefill from it too.'],
+      ['The line under the ghost',
+       'The target: what it would take to beat your own number today, in whichever metric you picked in Settings → Motivation. It aims at last session while you are under it, then at your all-time best. Tick the set that clears it and it says so.'],
+    ],
+  },
+
+  history: {
+    title: 'History',
+    sub: 'Every finished session, newest first, grouped by month with that month’s session count and total volume.',
+    items: [
+      ['Tap any session',
+       'Opens it for editing. Sets, notes and exercises can be changed long after the fact, and every chart follows.'],
+      ['Deleting a session',
+       'Is done from inside it, at the bottom. It disappears from history, from your records, and from every chart.'],
+      ['Imported sessions',
+       'Carry an “imported” mark at the top. A CSV becomes one session per calendar day, with the routine name kept as the note. Sample sessions are marked too.'],
+      ['Volume, per month',
+       'Σ weight × reps over completed working sets. Warmups never count.'],
+    ],
+  },
+
+  progress: {
+    title: 'Progress',
+    sub: 'Overview is your whole training week by week. Per exercise is one lift at a time, over the window you pick.',
+    items: [
+      ['Estimated 1RM',
+       'Epley: weight × (1 + reps / 30), taking the best set of each session. An estimate, and optimistic above about 12 reps — which is why the formula is printed on the chart.'],
+      ['Volume',
+       'Σ weight × reps across completed sets. Warmups are excluded everywhere, including from personal records.'],
+      ['The trend line over Volume per session',
+       'A moving average — simple or exponential, over as many sessions as you choose in Settings → Plot settings. It reads NEEDS n+ until there are that many sessions.'],
+      ['↑ ↓ → in a volume reading',
+       'Where the trend line moved between the session before and this one: climbing, falling, or level.'],
+      ['Tap a point or a bar',
+       'Reads out its value. The charts of one exercise share a selection, so tapping a session marks it in all of them — the chart you touched reads out brightest, the others faintly.'],
+      ['1M / 3M / 6M / 1Y / All',
+       'Cuts the window. Averages and records are computed over the whole history first, so the window moves the view, not the numbers.'],
+      ['Going stale',
+       'Longest since you last trained it. Past three weeks it turns red.'],
+      ['Next target',
+       'What it would take to beat your all-time best in the metric picked in Settings → Motivation, how long that best has stood, and whether the last few sessions are climbing.'],
+    ],
+  },
+
+  settings: {
+    title: 'Settings',
+    sub: 'Preferences, the three editable dropdowns, what the Log aims at, how the trend line is computed, and your backups.',
+    items: [
+      ['Editable dropdowns',
+       'Rest timer, Weight step and Averaged over end in “Edit this list…”. That opens an editor where you add a value of your own — 75 seconds, a 3.75 kg plate pair, a 6-session average — or remove ones you never pick. Remove the value in use and the setting moves to the nearest one left; Reset to defaults puts the original list back.'],
+      ['Weight step and rep step',
+       'What one tap of − or + moves a set by while logging. The weight step follows the unit, so switching kg → lb relabels the list rather than converting it.'],
+      ['Moving averages',
+       'Simple averages the last n sessions equally. Exponential weights recent sessions more heavily, with k = 2/(n+1), and is seeded with the simple average of its first window — so both kinds start at the same session and the same number. Nothing is drawn until n sessions exist, and the average always runs over the full history before being cut to the window on screen.'],
+      ['Export, regularly',
+       `This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after ${EXPORT_NAG_DAYS} days.`],
+      ['Import',
+       'Import backup asks whether to merge or replace: merge keeps what is already here and leaves your settings alone, replace wipes the device first. Import CSV always merges, deleting nothing. The ⓘ beside those buttons has the detail on both, and on what each file carries.'],
+      ['Sample data',
+       'With no history logged, the Log offers Load sample data: six months of an example split, so the charts and records have something to show. It never touches your settings, and Remove sample data here takes all of it back out, leaving anything you logged yourself — including any sample exercise you have since used.'],
+      ['Target to beat',
+       'Which metric the Log’s target line, the Next target tile and the finish-session read-out all measure. Estimated 1RM responds to weight and reps both; Heaviest set and Reps are blunter; Volume is the easiest to beat, since another set does it. None turns all three off. A lift that has never carried a load is always measured in reps.'],
+      ['Theme',
+       'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
+      ['Reload app, Check for update, Clear offline cache',
+       'Installed on the Home Screen there is no address bar, so Reload app is the way to reopen the page as it stands. Check for update asks the server whether a newer version exists — the browser only looks on its own schedule otherwise — and a new one installs in the background behind a Reload toast, so it never lands mid-set. Clear offline cache is the blunt one: it deletes every stored copy of the app so the next load fetches all of it again, which is what to reach for when a release was redeployed under a version number that did not change. It needs a connection, and none of the three touch your data.'],
+      ['The version at the foot',
+       `Tap it for the version history — what changed in each release. The offline cache is named after it (${APP_VERSION}), so it changes whenever the app itself does.`],
+    ],
+  },
+};
+
+/**
+ * What changed, per released version, newest first. Reached by tapping the
+ * version at the foot of Settings — the number is only worth printing if you
+ * can find out what it means.
+ */
+function versionSheet() {
+  openSheet(`
+    <h2>Version history</h2>
+    <p class="sub">You are on ${esc(APP_VERSION)}. The version names the offline cache,
+      so it changes whenever the app itself does.</p>
+    ${CHANGELOG.map((rel) => `
+      <h3 class="h-sec">${esc(rel.v)}${rel.v === APP_VERSION ? ' · current' : ''}</h3>
+      <div class="info-list">
+        ${rel.items.map(([t, d]) => `<div class="info-item">
+          <span class="t">${esc(t)}</span>
+          <span class="s">${esc(d)}</span></div>`).join('')}
+      </div>`).join('')}
+    <button class="btn btn-block" style="margin-top:16px" data-close>Close</button>`);
+}
+
+function infoSheet() {
+  const info = INFO[currentTab()] || INFO.log;
+  openSheet(`
+    <h2>About ${esc(info.title)}</h2>
+    <p class="sub">${esc(info.sub)}</p>
+    <div class="info-list">
+      ${info.items.map(([t, d]) => `<div class="info-item">
+        <span class="t">${esc(t)}</span>
+        <span class="s">${esc(d)}</span></div>`).join('')}
+    </div>
+    <button class="btn btn-block" style="margin-top:16px" data-close>Got it</button>`);
+}
+
+/**
+ * The ⓘ under the four export/import buttons, covering both formats. The
+ * mechanics live here rather than in the Settings info sheet so they sit
+ * within reach of the buttons they are about — that sheet says why to keep
+ * exporting, this one says what each file actually holds.
+ */
+function dataFormatSheet() {
+  const items = [
+    ['Export backup — .json',
+     'Everything, exactly as stored: sessions, exercises, routines and your settings. This is the lossless one and the only real backup — which is why only this button counts towards the export reminder, and a CSV never does.'],
+    ['Import backup — merge or replace',
+     'Merge adds the file’s sessions, exercises and routines to what is already here and leaves your settings alone. Replace wipes this device first, settings included. Both match on id, so where the two hold the same session the file wins outright — it is not a line-by-line merge of the two versions.'],
+    ['Reading a backup elsewhere',
+     'It is plain JSON, so any text editor opens it. schemaVersion says which shape it is in; flexloop refuses a file written by a newer version of the app rather than guess at it.'],
+    ['CSV — one row per set',
+     'Plain text, opens in any spreadsheet. Columns: App Version, Routine Name, Exercise Name, Exercise Type, Weight, Rep, Duration, Date. The date carries a time, which is what keeps sets in order.'],
+    ['Import CSV',
+     'Reads that shape and always merges — nothing already here is deleted. Sets sharing a calendar day become one session. (Import CSV from for example Strongify.)'],
+    ['Export CSV',
+     'Writes the same file, working sets only. Routines, settings, RPE, warmup flags and unfinished sets have no column and do not survive the trip. Use the .json to move between devices; use the CSV to take your history somewhere else.'],
+  ];
+  openSheet(`
+    <h2>About export and import</h2>
+    <p class="sub">What each file carries, and what it leaves behind.</p>
+    <div class="info-list">
+      ${items.map(([t, d]) => `<div class="info-item">
+        <span class="t">${esc(t)}</span>
+        <span class="s">${esc(d)}</span></div>`).join('')}
+    </div>
+    <button class="btn btn-block" style="margin-top:16px" data-close>Got it</button>`);
+}
 
 function setMenu(c) {
   if (!c.set) return;
@@ -1282,13 +2810,83 @@ async function finishSession(session) {
     });
     if (!ok) return;
   }
+  // Judged before the session is closed and the view re-rendered, because both
+  // clear the history cache the verdicts are read from.
+  const verdicts = sessionVerdicts(session);
   session.endedAt = Date.now();
   await persist(session);
   state.activeId = null;
   stopRest();
   location.hash = '#/log';
   render();
-  toast(`Session saved — ${summaryLine(session)}`);
+  if (verdicts.length) debriefSheet(session, verdicts);
+  else toast(`Session saved — ${summaryLine(session)}`);
+}
+
+/* ------------------------------------------------------ session debrief */
+
+const VERDICTS = {
+  pr: { rank: 0, label: 'best ever', cls: 'v-pr' },
+  up: { rank: 1, label: 'up on last time', cls: 'v-up' },
+  level: { rank: 2, label: 'level with last time', cls: 'v-level' },
+  down: { rank: 3, label: 'down on last time', cls: 'v-down' },
+  first: { rank: 4, label: 'first time logged', cls: 'v-first' },
+};
+
+/**
+ * How each exercise in a finished session compares with its own past, best
+ * result first. Exercises with nothing completed are left out — a session is
+ * judged on what was ticked.
+ */
+function sessionVerdicts(session) {
+  if (!session) return [];
+  const metric = S.boostMetric(state.settings.boostMetric);
+  if (metric.id === 'off') return [];
+  const out = [];
+  for (const entry of session.entries || []) {
+    const sets = S.countedSets(entry);
+    if (!sets.length) continue;
+    const series = exHistory(entry.exerciseId, session.id);
+    const at = S.topWeightSet(sets);
+    const load = at ? Number(at.weight) || 0 : 0;
+    // No load in the history, or none carried today — which is also the case
+    // for an exercise being logged for the first time — leaves reps as the only
+    // metric with anything to say. The Log's target line applies the same rule.
+    const metricId = load <= 0 || S.seriesIsBodyweight(series) ? 'reps' : metric.id;
+    const v = S.sessionVerdict(series, sets, metricId, load);
+    if (!v.value) continue;
+    out.push({ ...v, name: exName(entry.exerciseId), metric: S.boostMetric(metricId) });
+  }
+  return out.sort((a, b) => VERDICTS[a.verdict].rank - VERDICTS[b.verdict].rank);
+}
+
+/**
+ * The finish-session read-out. It replaces the old one-line toast: the same
+ * summary is at the top, with what each exercise did under it.
+ */
+function debriefSheet(session, verdicts) {
+  const rows = verdicts.map((v) => {
+    const info = VERDICTS[v.verdict];
+    const shown = boostValue({ metric: v.metric }, v.value);
+    const delta = v.verdict === 'up' || v.verdict === 'pr'
+      ? ` +${boostValue({ metric: v.metric }, Math.abs(v.delta))}`
+      : v.verdict === 'down' ? ` −${boostValue({ metric: v.metric }, Math.abs(v.delta))}` : '';
+    return `<div class="verdict ${info.cls}">
+      <span class="grow"><span class="t">${esc(v.name)}</span>
+        <span class="s">${esc(info.label)}${esc(delta)}</span></span>
+      <span class="r">${esc(shown)}</span>
+    </div>`;
+  }).join('');
+
+  const prs = verdicts.filter((v) => v.verdict === 'pr').length;
+  openSheet(`
+    <h2>Session saved</h2>
+    <p class="sub">${esc(summaryLine(session))}${prs
+      ? ` · ${prs} best ever` : ''}</p>
+    <div class="verdicts">${rows}</div>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn btn-primary" data-close>Done</button>
+    </div>`);
 }
 
 /* ---------------------------------------------------- add-to-home hint */
@@ -1337,6 +2935,9 @@ async function registerSW() {
    ========================================================================== */
 
 async function boot() {
+  // index.html already set the palette from localStorage before first paint;
+  // this re-runs it against the parsed settings and dresses the toggle button.
+  applyTheme();
   try {
     await db.openDB();
   } catch (err) {
