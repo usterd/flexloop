@@ -6,6 +6,8 @@
    labels it, so nobody mistakes it for a tested max.
    ========================================================================= */
 
+import { t, locale, decimalSep } from './i18n.js';
+
 export const REP_TARGETS = [1, 3, 5, 8, 10, 12, 15];
 
 /* ------------------------------------------------------------ date utils */
@@ -26,30 +28,30 @@ export function daysBetween(aIso, bIso) {
   return Math.round((b - a) / 86400000);
 }
 
-/* Dates read the same on every phone. The device locale would otherwise decide
-   the month names, so the same chart says "20. Juli" on one handset and
-   "20 Jul" on the next; the app is written in English, and its dates are too.
-   en-GB keeps the day-first order the rest of the UI assumes. */
-export const LOCALE = 'en-GB';
+/* Dates read the same on every phone: the chosen language decides the month
+   names, never the device locale, so one handset set to German does not print
+   "20. Juli" inside an English interface — or the reverse. Both tags are
+   day-first, which is the order the rest of the UI assumes. */
+export { locale };
 
 export function fmtDate(iso, opts = { day: 'numeric', month: 'short' }) {
-  return parseLocalDate(iso).toLocaleDateString(LOCALE, opts);
+  return parseLocalDate(iso).toLocaleDateString(locale(), opts);
 }
 
 export function fmtDateLong(iso) {
-  return parseLocalDate(iso).toLocaleDateString(LOCALE, {
+  return parseLocalDate(iso).toLocaleDateString(locale(), {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 }
 
 export function relativeDays(iso, today = localDate()) {
   const n = daysBetween(iso, today);
-  if (n === 0) return 'today';
-  if (n === 1) return 'yesterday';
-  if (n < 7) return `${n} days ago`;
-  if (n < 14) return 'last week';
-  if (n < 60) return `${Math.round(n / 7)} weeks ago`;
-  return `${Math.round(n / 30)} months ago`;
+  if (n === 0) return t('time.today');
+  if (n === 1) return t('time.yesterday');
+  if (n < 7) return t('time.daysAgo', { n });
+  if (n < 14) return t('time.lastWeek');
+  if (n < 60) return t('time.weeksAgo', { n: Math.round(n / 7) });
+  return t('time.monthsAgo', { n: Math.round(n / 30) });
 }
 
 /** Monday-anchored start of the week containing `d`. */
@@ -62,11 +64,24 @@ export function weekStart(d) {
 
 /* ---------------------------------------------------------------- format */
 
+/* The decimal separator follows the language — 2.5 kg in English, 2,5 kg in
+   German. Only the reading changes: every number goes into storage, into the
+   CSV and into an option value as a plain JS number, and the two inputs that
+   read a weight back already accept either separator. */
 export function fmtNum(n, maxDp = 1) {
   if (!isFinite(n)) return '—';
   const r = Math.round(n * 10 ** maxDp) / 10 ** maxDp;
-  return Number.isInteger(r) ? String(r) : r.toFixed(maxDp);
+  const s = Number.isInteger(r) ? String(r) : r.toFixed(maxDp);
+  return decimalSep() === '.' ? s : s.replace('.', decimalSep());
 }
+
+/**
+ * A number exactly as JavaScript prints it, with only the decimal separator
+ * localised. fmtNum pads to its decimal places, which is right for a chart
+ * axis and wrong for a list of plate sizes: 2,50 kg beside 1 kg claims a
+ * precision the plates do not have.
+ */
+export const fmtDec = (v) => String(v).replace('.', decimalSep());
 
 export function fmtVolume(n, unit) {
   // 'k' rather than tonnes, so the label stays honest in lb as well as kg.
@@ -228,12 +243,18 @@ export function lastTrainedMap(sessions) {
  * reads as "reps in the best set", which is what a bodyweight lift wants.
  */
 export const BOOST_METRICS = [
-  { id: 'off', label: 'None', short: '' },
-  { id: 'e1rm', label: 'Estimated 1RM', short: 'e1RM' },
-  { id: 'weight', label: 'Heaviest set', short: 'top set' },
-  { id: 'reps', label: 'Reps at your working weight', short: 'reps' },
-  { id: 'volume', label: 'Volume this session', short: 'volume' },
-];
+  { id: 'off' },
+  { id: 'e1rm' },
+  { id: 'weight' },
+  { id: 'reps' },
+  { id: 'volume' },
+].map((m) => ({
+  ...m,
+  // Getters, not strings: the language can change under a metric object that
+  // has already been handed out, and these have to follow it.
+  get label() { return t(`metric.${m.id}.label`); },
+  get short() { return t(`metric.${m.id}.short`); },
+}));
 
 export function boostMetric(id) {
   return BOOST_METRICS.find((m) => m.id === id) || BOOST_METRICS[0];
@@ -393,7 +414,7 @@ export function weeklyBuckets(sessions, exercisesById, weeks = 12) {
     buckets.push({
       start,
       key: localDate(start),
-      label: start.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }),
+      label: start.toLocaleDateString(locale(), { day: 'numeric', month: 'short' }),
       sessions: 0,
       volume: 0,
       byGroup: {},
@@ -441,10 +462,15 @@ export function weekStreak(sessions) {
  * one of these ids and the Data tab can round-trip it.
  */
 export const MA_MODES = [
-  { id: 'off', label: 'None', short: '' },
-  { id: 'sma', label: 'Simple moving average', short: 'SMA' },
-  { id: 'ema', label: 'Exponential moving average', short: 'EMA' },
-];
+  { id: 'off', short: '' },
+  { id: 'sma', short: 'SMA' },
+  { id: 'ema', short: 'EMA' },
+].map((m) => ({
+  ...m,
+  // SMA and EMA are the same two letters in both languages; only the long
+  // name in the Settings dropdown is translated.
+  get label() { return t(`maMode.${m.id}`); },
+}));
 
 /**
  * Sessions per average. The lengths on offer are an editable list, held in
@@ -515,12 +541,12 @@ export function movingAverage(values, period = MA_DEFAULT_PERIOD, kind = 'sma') 
 /* ------------------------------------------------------------ time windows */
 
 export const WINDOWS = [
-  { id: '1m', label: '1M', days: 31 },
-  { id: '3m', label: '3M', days: 92 },
-  { id: '6m', label: '6M', days: 183 },
-  { id: '1y', label: '1Y', days: 366 },
-  { id: 'all', label: 'All', days: null },
-];
+  { id: '1m', days: 31 },
+  { id: '3m', days: 92 },
+  { id: '6m', days: 183 },
+  { id: '1y', days: 366 },
+  { id: 'all', days: null },
+].map((w) => ({ ...w, get label() { return t(`window.${w.id}`); } }));
 
 export function filterWindow(series, windowId) {
   const w = WINDOWS.find((x) => x.id === windowId);

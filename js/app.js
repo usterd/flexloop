@@ -17,6 +17,7 @@ import * as S from './stats.js';
 import { lineChart, barChart, setChart } from './charts.js';
 import { parseStrongifyCsv, looksLikeStrongify, toStrongifyCsv } from './importers.js';
 import { buildDemoData, isDemoExercise, isDemoRoutine } from './demo.js';
+import { LANGS, t, plural, list, variants, getLang, setLang } from './i18n.js';
 
 /** The string the service worker caches under. */
 const APP_VERSION = self.APP_VERSION || 'flexloop';
@@ -68,11 +69,8 @@ const unit = () => state.settings.unit;
    definite to flip. index.html repeats this resolution inline so the first
    paint is already in the right theme.                                     */
 
-const THEMES = [
-  { id: 'dark',  label: 'Dark' },
-  { id: 'light', label: 'Light' },
-  { id: 'auto',  label: 'Match system' },
-];
+const THEMES = ['dark', 'light', 'auto']
+  .map((id) => ({ id, get label() { return t(`theme.${id}`); } }));
 
 /* Must match --ink in each palette: this is the colour iOS paints behind
    the status bar and around the safe areas. */
@@ -96,24 +94,26 @@ function effectiveTheme() {
 }
 
 function applyTheme() {
-  const t = effectiveTheme();
-  document.documentElement.dataset.theme = t;
+  // `mode`, not `t`: t() is the translator, and every function in this file
+  // needs to be able to call it.
+  const mode = effectiveTheme();
+  document.documentElement.dataset.theme = mode;
   const meta = $('#theme-color');
-  if (meta) meta.setAttribute('content', THEME_INK[t]);
+  if (meta) meta.setAttribute('content', THEME_INK[mode]);
   // iOS only reads this one while parsing the head — index.html sets it there
   // too. Kept in step here so the next launch starts from the right value.
   const bar = $('#ios-status-bar');
-  if (bar) bar.setAttribute('content', t === 'light' ? 'default' : 'black');
+  if (bar) bar.setAttribute('content', mode === 'light' ? 'default' : 'black');
   const btn = $('#theme-btn');
   if (btn) {
     // The button shows the theme you would get, not the one you are in.
-    btn.innerHTML = t === 'dark' ? ICON_SUN : ICON_MOON;
-    btn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.innerHTML = mode === 'dark' ? ICON_SUN : ICON_MOON;
+    btn.setAttribute('aria-label', mode === 'dark' ? t('theme.toLight') : t('theme.toDark'));
   }
 }
 
 function setTheme(id) {
-  state.settings.theme = THEMES.some((t) => t.id === id) ? id : 'dark';
+  state.settings.theme = THEMES.some((x) => x.id === id) ? id : 'dark';
   db.saveSettings(state.settings);
   applyTheme();
 }
@@ -122,6 +122,42 @@ function setTheme(id) {
 lightMedia.addEventListener('change', () => {
   if (state.settings.theme === 'auto') applyTheme();
 });
+
+/* --------------------------------------------------------------- language
+
+   The twin of the theme block above, and deliberately shaped like it: the
+   stored preference is 'en' | 'de', the topbar prints the language you would
+   get rather than the one you are in, and everything the app says is rebuilt
+   from i18n.js on the next render.
+
+   Only the static markup of index.html needs patching by hand — every view
+   is a string built fresh — so applyLang() fills the handful of nodes
+   carrying data-i18n, plus the two toggles' own labels.                    */
+
+function applyLang() {
+  document.documentElement.lang = getLang();
+  const desc = $('#app-description');
+  if (desc) desc.setAttribute('content', t('app.description'));
+
+  $$('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+
+  const btn = $('#lang-btn');
+  if (btn) {
+    $('span', btn).textContent = t('lang.otherShort');
+    btn.setAttribute('aria-label', t('lang.toggle'));
+  }
+  const mark = $('.wordmark-link');
+  if (mark) mark.setAttribute('aria-label', t('app.wordmarkLink'));
+  // The theme button's label is a sentence, so it moves with the language too.
+  applyTheme();
+}
+
+function switchLang(id) {
+  state.settings.lang = setLang(id);
+  db.saveSettings(state.settings);
+  applyLang();
+  render();
+}
 
 /* ------------------------------------------------------------------ toast */
 
@@ -241,7 +277,7 @@ $('#sheet').addEventListener('click', (e) => {
   grab.addEventListener('pointercancel', end);
 })();
 
-function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
+function confirmSheet({ title, body, confirm = t('action.confirm'), danger = false }) {
   return new Promise((resolve) => {
     // Dismissing any other way — scrim, handle — leaves this false, which is
     // the same answer Cancel gives.
@@ -250,7 +286,7 @@ function confirmSheet({ title, body, confirm = 'Confirm', danger = false }) {
       <h2>${esc(title)}</h2>
       <p class="sub">${esc(body)}</p>
       <div class="btn-row" style="margin-top:18px">
-        <button class="btn" data-x="no">Cancel</button>
+        <button class="btn" data-x="no">${esc(t('action.cancel'))}</button>
         <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-x="yes">${esc(confirm)}</button>
       </div>`, (root) => {
       root.addEventListener('click', (e) => {
@@ -276,12 +312,12 @@ function chooseImportModeSheet({ title, body }) {
       <h2>${esc(title)}</h2>
       <p class="sub">${esc(body)}</p>
       <div class="rows" style="margin-top:14px">
-        <button class="row" data-x="merge"><span class="grow"><span class="t">Merge</span>
-          <span class="s">Adds to what is here. Settings untouched, nothing deleted</span></span></button>
-        <button class="row" data-x="replace"><span class="grow"><span class="t" style="color:var(--danger)">Replace everything</span>
-          <span class="s">Wipes this device first, settings included</span></span></button>
+        <button class="row" data-x="merge"><span class="grow"><span class="t">${esc(t('io.merge'))}</span>
+          <span class="s">${esc(t('io.mergeSub'))}</span></span></button>
+        <button class="row" data-x="replace"><span class="grow"><span class="t" style="color:var(--danger)">${esc(t('io.replace'))}</span>
+          <span class="s">${esc(t('io.replaceSub'))}</span></span></button>
       </div>
-      <button class="btn btn-block" style="margin-top:14px" data-x="no">Cancel</button>`, (root) => {
+      <button class="btn btn-block" style="margin-top:14px" data-x="no">${esc(t('action.cancel'))}</button>`, (root) => {
       root.addEventListener('click', (e) => {
         const b = e.target.closest('[data-x]');
         if (!b) return;
@@ -294,7 +330,7 @@ function chooseImportModeSheet({ title, body }) {
 }
 
 /** Resolves to the trimmed string, or null if cancelled or left empty. */
-function promptSheet({ title, body, label, value = '', placeholder = '', confirm = 'Save' }) {
+function promptSheet({ title, body, label, value = '', placeholder = '', confirm = t('action.save') }) {
   return new Promise((resolve) => {
     // Dismissed any other way and nothing was entered: same as Cancel.
     let answer = null;
@@ -307,7 +343,7 @@ function promptSheet({ title, body, label, value = '', placeholder = '', confirm
                autocapitalize="words" autocomplete="off" enterkeyhint="done">
       </div>
       <div class="btn-row" style="margin-top:16px">
-        <button class="btn" data-x="no">Cancel</button>
+        <button class="btn" data-x="no">${esc(t('action.cancel'))}</button>
         <button class="btn btn-primary" data-x="yes">${esc(confirm)}</button>
       </div>`, (root) => {
       const input = $('#pr-in', root);
@@ -368,7 +404,7 @@ async function persist(session) {
 
 function exName(id) {
   const e = state.byId.get(id);
-  return e ? e.name : 'Removed exercise';
+  return e ? e.name : t('exercise.removed');
 }
 
 /* ==========================================================================
@@ -429,8 +465,8 @@ async function render() {
     await hit[1](m);
   } else {
     view.innerHTML = `<div class="empty"><div class="glyph"></div>
-      <h3>Nothing here</h3><p>That screen doesn't exist.</p>
-      <a class="btn" href="#/log">Go to Log</a></div>`;
+      <h3>${esc(t('nav.notFound'))}</h3><p>${esc(t('nav.notFoundBody'))}</p>
+      <a class="btn" href="#/log">${esc(t('nav.goToLog'))}</a></div>`;
   }
   renderedKey = key;
   // After the await, so the new markup is in place; a taller offset than the
@@ -443,7 +479,7 @@ async function render() {
   });
   // The info button explains whatever is on screen, so its label moves too.
   const info = $('#info-btn');
-  if (info) info.setAttribute('aria-label', `About ${INFO[tab].title}`);
+  if (info) info.setAttribute('aria-label', t('nav.about', { title: infoFor(tab).title }));
 }
 
 window.addEventListener('hashchange', render);
@@ -458,26 +494,17 @@ window.addEventListener('hashchange', render);
  * with its own — so the largest text on the tab may as well push you into the
  * session instead.
  */
-const MOTIVATIONS = [
-  "Let's go!",
-  'Time to lift.',
-  'Show up again.',
-  'Make it count.',
-  'One more rep.',
-  'No zero days.',
-  'Beat last time.',
-  'Earn the rest.',
-  'Strong starts now.',
-  'Nobody lifts it for you.',
-];
-
 /* Rolled once per page load, not once per render: the idle Log rebuilds
    whenever you come back to the tab or discard a session, and a line that
-   reshuffled underneath you would read as a glitch rather than a greeting. */
+   reshuffled underneath you would read as a glitch rather than a greeting.
+
+   The index is held rather than the line itself, so switching language keeps
+   the greeting you were given and only changes what it is written in. */
 let motivation = null;
 function motivationLine() {
-  if (motivation === null) motivation = MOTIVATIONS[Math.floor(Math.random() * MOTIVATIONS.length)];
-  return motivation;
+  const lines = list('log.motivations');
+  if (motivation === null) motivation = Math.floor(Math.random() * lines.length);
+  return lines[motivation % lines.length];
 }
 
 function viewLog() {
@@ -490,53 +517,55 @@ function viewLog() {
     const todays = state.sessions.filter((s) => s.date === today);
     view.innerHTML = `
       ${hintHtml()}
-      <p class="eyebrow">Today</p>
+      <p class="eyebrow">${esc(t('log.eyebrowToday'))}</p>
       <h2 class="h-big">${esc(motivationLine())}</h2>
       <p class="sub">${last
-        ? `Last session ${esc(S.relativeDays(last.date))} — ${esc(summaryLine(last))}.`
-        : 'No sessions logged yet. The first one sets your baseline.'}</p>
+        ? esc(t('log.lastSession', {
+          when: S.relativeDays(last.date), summary: summaryLine(last) }))
+        : esc(t('log.noneYet'))}</p>
       <div style="height:18px"></div>
       <button class="btn btn-primary btn-lg btn-block btn-stack" data-act="start">
-        <span class="bt">Start session</span>
-        <span class="bs">Pick exercises manually</span>
+        <span class="bt">${esc(t('log.start'))}</span>
+        <span class="bs">${esc(t('log.startSub'))}</span>
       </button>
       ${state.sessions.length ? '' : `
-        <button class="btn btn-block" style="margin-top:8px" data-act="load-demo">Load sample data</button>`}
+        <button class="btn btn-block" style="margin-top:8px" data-act="load-demo">${esc(t('log.loadDemo'))}</button>`}
       ${routinePickerHtml()}
       ${todays.length ? `
-        <h3 class="h-sec">Finished today</h3>
+        <h3 class="h-sec">${esc(t('log.finishedToday'))}</h3>
         <div class="rows">${todays.map(sessionRowHtml).join('')}</div>` : ''}
       ${state.sessions.length ? `
-        <h3 class="h-sec">Recent</h3>
+        <h3 class="h-sec">${esc(t('word.recent'))}</h3>
         <div class="rows">${state.sessions.slice(0, 5).map(sessionRowHtml).join('')}</div>` : ''}
-      ${state.sessions.length ? `<p class="meta">${state.sessions.length} sessions · ${state.exercises.length} exercises</p>` : ''}`;
+      ${state.sessions.length ? `<p class="meta">${esc(t('log.counts', {
+        sessions: state.sessions.length, exercises: state.exercises.length }))}</p>` : ''}`;
     return;
   }
 
   $('#topbar-action').innerHTML =
-    `<button class="btn btn-sm" data-act="finish">Finish</button>`;
+    `<button class="btn btn-sm" data-act="finish">${esc(t('log.finish'))}</button>`;
 
   view.innerHTML = `
-    <p class="eyebrow">In progress</p>
+    <p class="eyebrow">${esc(t('log.eyebrowInProgress'))}</p>
     <h2 class="h-big">${esc(S.fmtDate(session.date, { weekday: 'long', day: 'numeric', month: 'short' }))}</h2>
     <p class="sub" data-live-summary>${esc(summaryLine(session))} · <span data-elapsed>${elapsed(session)}</span></p>
     <div style="height:16px"></div>
     <div data-entries>${(session.entries || []).map((e, i) => entryHtml(session, e, i)).join('')}</div>
-    <button class="btn btn-block" data-act="pick-exercise">+ Add exercise</button>
+    <button class="btn btn-block" data-act="pick-exercise">${esc(t('log.addExercise'))}</button>
     ${saveRoutineBtnHtml(session)}
     <div class="field" style="margin-top:20px">
-      <label for="snotes">Session notes</label>
-      <textarea class="input" id="snotes" data-act="notes" placeholder="Felt strong, bar speed good…">${esc(session.notes || '')}</textarea>
+      <label for="snotes">${esc(t('log.notes'))}</label>
+      <textarea class="input" id="snotes" data-act="notes" placeholder="${esc(t('log.notesPlaceholder'))}">${esc(session.notes || '')}</textarea>
     </div>
-    <button class="btn btn-primary btn-block btn-lg" data-act="finish">Finish session</button>
-    <button class="btn btn-quiet btn-block btn-sm" style="margin-top:8px" data-act="discard">Discard session</button>`;
+    <button class="btn btn-primary btn-block btn-lg" data-act="finish">${esc(t('log.finishSession'))}</button>
+    <button class="btn btn-quiet btn-block btn-sm" style="margin-top:8px" data-act="discard">${esc(t('log.discardSession'))}</button>`;
 }
 
 /** Sits under "+ Add exercise": this list of exercises *is* the routine. */
 function saveRoutineBtnHtml(session) {
   if (!(session.entries || []).length) return '';
   return `<button class="btn btn-quiet btn-block btn-sm" style="margin-top:8px"
-    data-act="save-routine" data-id="${esc(session.id)}">Save as routine</button>`;
+    data-act="save-routine" data-id="${esc(session.id)}">${esc(t('log.saveAsRoutine'))}</button>`;
 }
 
 /** How many of a routine's exercises still exist, and a readable list. */
@@ -548,9 +577,9 @@ function routineExercises(routine) {
 
 function routineSummary(routine) {
   const live = routineExercises(routine);
-  if (!live.length) return 'No exercises left in this routine';
-  const sets = live.reduce((t, it) => t + (it.sets || 1), 0);
-  return `${live.length} exercise${live.length === 1 ? '' : 's'} · ${sets} set${sets === 1 ? '' : 's'}`;
+  if (!live.length) return t('routine.emptySummary');
+  const sets = live.reduce((sum, it) => sum + (it.sets || 1), 0);
+  return `${plural('count.exercises', live.length)} · ${plural('count.sets', sets)}`;
 }
 
 /** The "start from a routine" block under the Start button on an idle Log. */
@@ -564,28 +593,31 @@ function routinePickerHtml() {
       </span>
       <span class="r">${r.lastUsedAt
         ? esc(S.relativeDays(S.localDate(new Date(r.lastUsedAt))))
-        : 'new'}</span>
+        : esc(t('word.new'))}</span>
     </button>`).join('');
-  return `<h3 class="h-sec">Start from a routine</h3>
+  return `<h3 class="h-sec">${esc(t('log.startFromRoutine'))}</h3>
     <div class="rows rows-accent">${rows}</div>
     ${state.routines.length > 6
-      ? `<p class="meta" style="text-align:left;padding:8px 0 0"><a href="#/routines">All ${state.routines.length} routines</a></p>`
+      ? `<p class="meta" style="text-align:left;padding:8px 0 0"><a href="#/routines">${
+          esc(t('log.allRoutines', { n: state.routines.length }))}</a></p>`
       : ''}`;
 }
 
 function elapsed(session) {
   const ms = Date.now() - (session.startedAt || Date.now());
   const mins = Math.max(0, Math.floor(ms / 60000));
-  if (mins < 60) return `${mins} min`;
-  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+  if (mins < 60) return t('time.minutes', { n: mins });
+  return t('time.hoursMinutes', {
+    h: Math.floor(mins / 60), m: String(mins % 60).padStart(2, '0') });
 }
 
 function summaryLine(session) {
   const sets = S.sessionSetCount(session);
   const vol = S.sessionVolume(session);
   const n = (session.entries || []).length;
-  if (!n) return 'Empty so far';
-  return `${n} exercise${n === 1 ? '' : 's'} · ${sets} set${sets === 1 ? '' : 's'}${vol ? ` · ${S.fmtVolume(vol, unit())}` : ''}`;
+  if (!n) return t('log.emptySoFar');
+  return `${plural('count.exercises', n)} · ${plural('count.sets', sets)}${
+    vol ? ` · ${S.fmtVolume(vol, unit())}` : ''}`;
 }
 
 function sessionRowHtml(s) {
@@ -601,21 +633,18 @@ function sessionRowHtml(s) {
 /** The ghost line: what you did last time, always visible. */
 function ghostHtml(session, entry) {
   const last = S.lastPerformance(state.sessions, entry.exerciseId, session.id);
-  if (!last) return `<div class="ghost">First time logging this</div>`;
-  const w = last.weight > 0 ? `${S.fmtNum(last.weight)} ${unit()} × ${last.reps}` : `${last.reps} reps`;
-  return `<div class="ghost">Last <b>${esc(w)}</b> · ${esc(S.relativeDays(last.date))}</div>`;
+  if (!last) return `<div class="ghost">${esc(t('log.ghostFirst'))}</div>`;
+  const w = last.weight > 0
+    ? `${S.fmtNum(last.weight)} ${unit()} × ${last.reps}`
+    : t('count.reps', { n: last.reps });
+  return `<div class="ghost">${t('log.ghostLast', {
+    value: `<b>${esc(w)}</b>`, when: esc(S.relativeDays(last.date)) })}</div>`;
 }
 
 /* ---------------------------------------------------------- the boost */
 
 /** What each target means, in the Settings note under the dropdown. */
-const BOOST_NOTES = {
-  off: 'No target line. The Log shows only what you lifted last time.',
-  e1rm: 'Epley, weight × (1 + reps / 30), on your best set. Both more weight and more reps beat it, so the line offers each.',
-  weight: 'The heaviest single set you have done, whatever the reps. Beaten by one more notch of the weight step.',
-  reps: 'The most reps you have managed at the weight you are working at today, or heavier.',
-  volume: 'Σ weight × reps over the whole exercise in one session. Beaten by an extra set as readily as a heavier one.',
-};
+const boostNote = (id) => t(`boostNote.${id}`);
 
 /**
  * Per-exercise history with one session left out, memoised for the length of
@@ -665,7 +694,7 @@ function boostState(session, entry) {
 function boostValue(b, n) {
   const m = b.metric.id;
   if (m === 'volume') return S.fmtVolume(n, unit());
-  if (m === 'reps') return `${S.fmtNum(n, 0)} reps`;
+  if (m === 'reps') return t('count.reps', { n: S.fmtNum(n, 0) });
   return `${S.fmtNum(n, m === 'e1rm' ? 1 : 0)} ${unit()}`;
 }
 
@@ -682,13 +711,14 @@ function boostHeadline(b) {
     return null;
   }
   if (m === 'weight') return b.weight != null ? { v: S.fmtNum(b.weight), small: unit() } : null;
-  if (m === 'reps') return b.reps != null ? { v: String(b.reps), small: 'reps' } : null;
+  if (m === 'reps') return b.reps != null ? { v: String(b.reps), small: t('metric.reps.short') } : null;
   return b.sets != null
-    ? { v: String(b.sets), small: `${b.sets === 1 ? 'set' : 'sets'} of ${b.atReps}` } : null;
+    ? { v: String(b.sets),
+        small: t(b.sets === 1 ? 'boost.setOf' : 'boost.setsOf', { reps: b.atReps }) } : null;
 }
 
 /** What a cleared target actually beat — the all-time best outranks last time. */
-const beatenWhat = (b) => (b.current > b.best ? 'past your best' : 'past last time');
+const beatenWhat = (b) => t(b.current > b.best ? 'boost.pastBest' : 'boost.pastLast');
 
 /** The concrete ways to clear a target, as one phrase. */
 function boostWays(b) {
@@ -698,11 +728,11 @@ function boostWays(b) {
     if (b.reps != null) ways.push(`${S.fmtNum(b.atWeight)}×${b.reps}`);
     // Only worth offering when it is actually a heavier bar than today's.
     if (b.weight != null && b.weight > b.atWeight) ways.push(`${S.fmtNum(b.weight)}×${b.atReps}`);
-    return ways.join(' or ');
+    return ways.join(t('boost.or'));
   }
-  if (m === 'weight') return b.weight != null ? `try ${S.fmtNum(b.weight)}` : '';
-  if (m === 'reps') return b.reps != null ? `try ${b.reps}` : '';
-  return b.sets != null ? `${b.sets} more set${b.sets === 1 ? '' : 's'} of ${b.atReps}` : '';
+  if (m === 'weight') return b.weight != null ? t('boost.tryWeight', { weight: S.fmtNum(b.weight) }) : '';
+  if (m === 'reps') return b.reps != null ? t('boost.tryReps', { reps: b.reps }) : '';
+  return b.sets != null ? plural('boost.moreSets', b.sets, { reps: b.atReps }) : '';
 }
 
 /** The target as one line under the ghost. Empty but present, so it can be patched. */
@@ -713,16 +743,18 @@ function boostHtml(session, entry) {
   let text;
 
   if (b.achieved) {
-    text = `<b>${esc(boostValue(b, b.current))}</b>${tag} · ${beatenWhat(b)}`;
+    text = `<b>${esc(boostValue(b, b.current))}</b>${tag} · ${esc(beatenWhat(b))}`;
   } else {
     const at = b.metric.id === 'reps' && b.atWeight > 0
-      ? ` at ${esc(`${S.fmtNum(b.atWeight)} ${unit()}`)}` : '';
+      ? t('boost.at', { weight: esc(`${S.fmtNum(b.atWeight)} ${unit()}`) }) : '';
     const ways = boostWays(b);
-    text = `Beat <b>${esc(boostValue(b, b.target))}</b>${tag}${at}${ways ? ` · ${esc(ways)}` : ''}`;
+    text = `${t('boost.beat', { value: `<b>${esc(boostValue(b, b.target))}</b>` })
+      }${tag}${at}${ways ? ` · ${esc(ways)}` : ''}`;
   }
 
   // One improvement spans two sessions, hence the +1.
-  const streak = b.streak >= 1 ? `<i>${b.streak + 1} sessions climbing</i>` : '';
+  const streak = b.streak >= 1
+    ? `<i>${esc(t('boost.climbing', { n: b.streak + 1 }))}</i>` : '';
   return `<div class="boost${b.achieved ? ' is-hit' : ''}" data-boost>${text}${streak}</div>`;
 }
 
@@ -739,29 +771,32 @@ function patchBoost(session, entry, entryEl) {
 function celebrate(b, setEl) {
   if (setEl) setEl.classList.add('is-pr');
   if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
-  toast(`${b.current > b.best ? 'New best' : 'Past last time'} — ${
-    boostValue(b, b.current)} ${b.metric.short}`.trim());
+  toast(t('boost.toast', {
+    what: t(b.current > b.best ? 'boost.newBest' : 'boost.beatLast'),
+    value: boostValue(b, b.current),
+    metric: b.metric.short,
+  }).trim());
 }
 
 function setRowHtml(entry, set, si) {
   const ex = state.byId.get(entry.exerciseId) || {};
   const bw = ex.isBodyweight;
   return `<div class="set${set.done ? ' is-done' : ''}${set.isWarmup ? ' is-warmup' : ''}" data-set="${si}">
-    <span class="num">${set.isWarmup ? 'W' : si + 1}</span>
-    ${bw && !set.weight ? `<span class="unit-tag" style="text-align:center">bodyweight</span>` : `
+    <span class="num">${set.isWarmup ? esc(t('set.warmupShort')) : si + 1}</span>
+    ${bw && !set.weight ? `<span class="unit-tag" style="text-align:center">${esc(t('word.bodyweight'))}</span>` : `
     <div class="stepper">
-      <button class="step" data-act="step" data-f="weight" data-d="-1" aria-label="Less weight">−</button>
+      <button class="step" data-act="step" data-f="weight" data-d="-1" aria-label="${esc(t('set.lessWeight'))}">−</button>
       <input class="val" data-f="weight" inputmode="decimal" enterkeyhint="done"
-             value="${S.fmtNum(set.weight || 0)}" aria-label="Weight in ${esc(unit())}">
-      <button class="step" data-act="step" data-f="weight" data-d="1" aria-label="More weight">+</button>
+             value="${S.fmtNum(set.weight || 0)}" aria-label="${esc(t('set.weightIn', { unit: unit() }))}">
+      <button class="step" data-act="step" data-f="weight" data-d="1" aria-label="${esc(t('set.moreWeight'))}">+</button>
     </div>`}
     <div class="stepper">
-      <button class="step" data-act="step" data-f="reps" data-d="-1" aria-label="Fewer reps">−</button>
+      <button class="step" data-act="step" data-f="reps" data-d="-1" aria-label="${esc(t('set.fewerReps'))}">−</button>
       <input class="val" data-f="reps" inputmode="numeric" enterkeyhint="done"
-             value="${set.reps || 0}" aria-label="Reps">
-      <button class="step" data-act="step" data-f="reps" data-d="1" aria-label="More reps">+</button>
+             value="${set.reps || 0}" aria-label="${esc(t('set.repsAria'))}">
+      <button class="step" data-act="step" data-f="reps" data-d="1" aria-label="${esc(t('set.moreReps'))}">+</button>
     </div>
-    <button class="set-done" data-act="done" aria-pressed="${set.done ? 'true' : 'false'}" aria-label="Mark set done">
+    <button class="set-done" data-act="done" aria-pressed="${set.done ? 'true' : 'false'}" aria-label="${esc(t('set.markDone'))}">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
     </button>
   </div>`;
@@ -774,7 +809,7 @@ function entryTitleHtml(entry) {
   if (!ex) return `<h3 class="card-title">${esc(exName(entry.exerciseId))}</h3>`;
   return `<h3 class="card-title"><button type="button" class="title-jump"
       data-act="jump-exercise" data-id="${esc(ex.id)}"
-      aria-label="${esc(ex.name)} — see progress">
+      aria-label="${esc(t('log.seeProgress', { name: ex.name }))}">
       <span>${esc(ex.name)}</span>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-6 4 4 7-8"/></svg>
     </button></h3>`;
@@ -785,7 +820,7 @@ function setHeadHtml() {
   return `<div class="set-head" aria-hidden="true">
     <span></span>
     <span>${esc(unit().toUpperCase())}</span>
-    <span>Reps</span>
+    <span>${esc(t('word.reps'))}</span>
     <span></span>
   </div>`;
 }
@@ -798,13 +833,13 @@ function entryHtml(session, entry, ei) {
         ${ghostHtml(session, entry)}
         ${boostHtml(session, entry)}
       </div>
-      <button class="btn btn-sm btn-quiet" data-act="entry-menu" aria-label="Exercise options">•••</button>
+      <button class="btn btn-sm btn-quiet" data-act="entry-menu" aria-label="${esc(t('log.exerciseOptions'))}">•••</button>
     </div>
     ${entry.sets.length ? setHeadHtml() : ''}
     <div class="sets">${entry.sets.map((s, i) => setRowHtml(entry, s, i)).join('')}</div>
     <div class="set-foot">
-      <button class="btn btn-sm" data-act="add-set" style="flex:1">+ Set</button>
-      <button class="btn btn-sm btn-quiet" data-act="add-warmup">+ Warmup</button>
+      <button class="btn btn-sm" data-act="add-set" style="flex:1">${esc(t('log.addSet'))}</button>
+      <button class="btn btn-sm btn-quiet" data-act="add-warmup">${esc(t('log.addWarmup'))}</button>
     </div>
   </section>`;
 }
@@ -850,7 +885,7 @@ async function startRoutine(routineId) {
   if (!r) return;
   const live = routineExercises(r);
   if (!live.length) {
-    toast('Every exercise in that routine has been deleted');
+    toast(t('routine.allDeleted'));
     return;
   }
   // Starting a routine mid-session would leave two sessions open at once, and
@@ -859,9 +894,10 @@ async function startRoutine(routineId) {
   const open = activeSession();
   if (open) {
     const ok = await confirmSheet({
-      title: 'Session already in progress',
-      body: `Add the ${live.length} exercise${live.length === 1 ? '' : 's'} from ${r.name} to the session you have open?`,
-      confirm: 'Add to session',
+      title: t('routine.alreadyOpen'),
+      body: t('routine.alreadyOpenBody', {
+        exercises: plural('count.exercises', live.length), name: r.name }),
+      confirm: t('routine.addToSession'),
     });
     if (!ok) return;
   }
@@ -885,8 +921,8 @@ async function startRoutine(routineId) {
   const dropped = (r.items || []).length - live.length;
   location.hash = '#/log';
   render();
-  toast(`${open ? 'Added' : 'Started'} ${r.name}${dropped
-    ? ` — ${dropped} deleted exercise${dropped === 1 ? '' : 's'} skipped` : ''}`);
+  toast(`${t(open ? 'routine.addedToast' : 'routine.startedToast', { name: r.name })}${dropped
+    ? t('routine.droppedSuffix', { exercises: plural('count.deletedExercises', dropped) }) : ''}`);
 }
 
 /** New sets inherit from the previous set here, else from last time. */
@@ -942,31 +978,32 @@ function pickExercise(onPick) {
     const hits = needle
       ? sorted.filter((e) => e.name.toLowerCase().includes(needle))
       : sorted;
-    const list = hits.slice(0, 60).map((e) => `
+    const rows = hits.slice(0, 60).map((e) => `
       <button class="row" data-pick="${esc(e.id)}">
         <span class="grow">
           <span class="t">${esc(e.name)}</span>
-          <span class="s">${esc(e.muscleGroup || 'Uncategorised')}</span>
+          <span class="s">${esc(e.muscleGroup || t('exercise.uncategorised'))}</span>
         </span>
-        <span class="r">${lastMap.get(e.id) ? esc(S.relativeDays(lastMap.get(e.id))) : 'new'}</span>
+        <span class="r">${lastMap.get(e.id)
+          ? esc(S.relativeDays(lastMap.get(e.id))) : esc(t('word.new'))}</span>
       </button>`).join('');
     const canCreate = needle && !hits.some((e) => e.name.toLowerCase() === needle);
     return (canCreate ? `<button class="row" data-create="1">
-        <span class="grow"><span class="t">Create “${esc(q.trim())}”</span>
-        <span class="s">Adds it to your exercise list</span></span>
-        <span class="r">+</span></button>` : '') + list ||
-      `<div class="empty" style="padding:26px 10px"><p style="margin:0">Type a name to create your first exercise.</p></div>`;
+        <span class="grow"><span class="t">${esc(t('picker.create', { name: q.trim() }))}</span>
+        <span class="s">${esc(t('picker.createSub'))}</span></span>
+        <span class="r">+</span></button>` : '') + rows ||
+      `<div class="empty" style="padding:26px 10px"><p style="margin:0">${esc(t('picker.empty'))}</p></div>`;
   };
 
   openSheet(`
-    <h2>Add exercise</h2>
-    <div class="field"><input class="input" id="exq" type="search" placeholder="Search or type a new name"
+    <h2>${esc(t('picker.title'))}</h2>
+    <div class="field"><input class="input" id="exq" type="search" placeholder="${esc(t('picker.search'))}"
       autocapitalize="words" autocomplete="off" enterkeyhint="done"></div>
     <div class="rows" id="exlist">${rowsFor('')}</div>`, (root) => {
     const q = $('#exq', root);
-    const list = $('#exlist', root);
-    q.addEventListener('input', () => { list.innerHTML = rowsFor(q.value); });
-    list.addEventListener('click', async (e) => {
+    const listEl = $('#exlist', root);
+    q.addEventListener('input', () => { listEl.innerHTML = rowsFor(q.value); });
+    listEl.addEventListener('click', async (e) => {
       const pick = e.target.closest('[data-pick]');
       const create = e.target.closest('[data-create]');
       if (pick) {
@@ -976,7 +1013,7 @@ function pickExercise(onPick) {
         const ex = {
           id: uid('ex'),
           name: q.value.trim(),
-          muscleGroup: 'Uncategorised',
+          muscleGroup: t('exercise.uncategorised'),
           unit: unit(),
           isBodyweight: false,
         };
@@ -1006,27 +1043,30 @@ function viewSession(id) {
   const session = sessionById(id);
   const view = $('#view');
   if (!session) {
-    view.innerHTML = `<div class="empty"><div class="glyph"></div><h3>Session not found</h3>
-      <p>It may have been deleted.</p><a class="btn" href="#/history">Back to history</a></div>`;
+    view.innerHTML = `<div class="empty"><div class="glyph"></div><h3>${esc(t('session.notFound'))}</h3>
+      <p>${esc(t('session.maybeDeleted'))}</p>
+      <a class="btn" href="#/history">${esc(t('session.backToHistory'))}</a></div>`;
     return;
   }
-  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/history">Back</a>`;
+  $('#topbar-action').innerHTML =
+    `<a class="btn btn-sm btn-quiet" href="#/history">${esc(t('action.back'))}</a>`;
   view.innerHTML = `
-    <p class="eyebrow">${session.endedAt ? 'Completed' : 'In progress'}${
-      session.source === 'strongify' ? ' · imported' : session.source === 'demo' ? ' · sample' : ''}</p>
+    <p class="eyebrow">${esc(session.endedAt ? t('session.completed') : t('log.eyebrowInProgress'))}${
+      session.source === 'strongify' ? ` · ${esc(t('word.imported'))}`
+        : session.source === 'demo' ? ` · ${esc(t('word.sample'))}` : ''}</p>
     <h2 class="h-big">${esc(S.fmtDate(session.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</h2>
     <p class="sub">${esc(summaryLine(session))}</p>
     <div style="height:16px"></div>
     <div data-entries>${(session.entries || []).map((e, i) => entryHtml(session, e, i)).join('')}</div>
-    <button class="btn btn-block" data-act="pick-exercise">+ Add exercise</button>
+    <button class="btn btn-block" data-act="pick-exercise">${esc(t('log.addExercise'))}</button>
     ${saveRoutineBtnHtml(session)}
     <div class="field" style="margin-top:20px">
-      <label for="snotes">Session notes</label>
-      <textarea class="input" id="snotes" data-act="notes" placeholder="Nothing noted">${esc(session.notes || '')}</textarea>
+      <label for="snotes">${esc(t('log.notes'))}</label>
+      <textarea class="input" id="snotes" data-act="notes" placeholder="${esc(t('log.notesEmpty'))}">${esc(session.notes || '')}</textarea>
     </div>
-    ${session.endedAt ? '' : `<button class="btn btn-primary btn-block" data-act="finish">Finish session</button>`}
-    <button class="btn btn-danger btn-block btn-sm" style="margin-top:10px" data-act="delete-session">Delete this session</button>
-    <p class="meta">${esc(new Date(session.startedAt).toLocaleString(S.LOCALE))}</p>`;
+    ${session.endedAt ? '' : `<button class="btn btn-primary btn-block" data-act="finish">${esc(t('log.finishSession'))}</button>`}
+    <button class="btn btn-danger btn-block btn-sm" style="margin-top:10px" data-act="delete-session">${esc(t('session.deleteThis'))}</button>
+    <p class="meta">${esc(new Date(session.startedAt).toLocaleString(S.locale()))}</p>`;
 }
 
 /* ==========================================================================
@@ -1037,8 +1077,8 @@ function viewHistory() {
   const view = $('#view');
   if (!state.sessions.length) {
     view.innerHTML = `<div class="empty"><div class="glyph"></div>
-      <h3>No history yet</h3><p>Finished sessions collect here, newest first.</p>
-      <a class="btn btn-primary" href="#/log">Start a session</a></div>`;
+      <h3>${esc(t('history.empty'))}</h3><p>${esc(t('history.emptyBody'))}</p>
+      <a class="btn btn-primary" href="#/log">${esc(t('history.startSession'))}</a></div>`;
     return;
   }
   const groups = new Map();
@@ -1050,16 +1090,16 @@ function viewHistory() {
   const blocks = [...groups.entries()].map(([month, list]) => {
     const vol = list.reduce((t, s) => t + S.sessionVolume(s), 0);
     const title = S.parseLocalDate(`${month}-01`)
-      .toLocaleDateString(S.LOCALE, { month: 'long', year: 'numeric' });
+      .toLocaleDateString(S.locale(), { month: 'long', year: 'numeric' });
     return `<h3 class="h-sec">${esc(title)}
         <span style="float:right;font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:500">
           ${list.length} · ${esc(S.fmtVolume(vol, unit()))}</span></h3>
       <div class="rows">${list.map(sessionRowHtml).join('')}</div>`;
   }).join('');
 
-  view.innerHTML = `<p class="eyebrow">History</p>
-    <h2 class="h-big">${state.sessions.length} session${state.sessions.length === 1 ? '' : 's'}</h2>
-    <p class="sub">Tap any session to edit or delete it.</p>
+  view.innerHTML = `<p class="eyebrow">${esc(t('history.eyebrow'))}</p>
+    <h2 class="h-big">${esc(plural('count.sessions', state.sessions.length))}</h2>
+    <p class="sub">${esc(t('history.sub'))}</p>
     ${blocks}`;
 }
 
@@ -1071,10 +1111,10 @@ function viewProgress() {
   const view = $('#view');
   const tab = state.progressTab;
   view.innerHTML = `
-    <p class="eyebrow">Progress</p>
+    <p class="eyebrow">${esc(t('progress.eyebrow'))}</p>
     <div class="seg" data-seg="progressTab">
-      <button data-v="overview" aria-pressed="${tab === 'overview'}">Overview</button>
-      <button data-v="exercise" aria-pressed="${tab === 'exercise'}">Per exercise</button>
+      <button data-v="overview" aria-pressed="${tab === 'overview'}">${esc(t('progress.overview'))}</button>
+      <button data-v="exercise" aria-pressed="${tab === 'exercise'}">${esc(t('progress.perExercise'))}</button>
     </div>
     <div id="pbody"></div>`;
   if (tab === 'overview') renderOverview($('#pbody'));
@@ -1083,9 +1123,9 @@ function viewProgress() {
 
 function renderOverview(root) {
   if (!state.sessions.length) {
-    root.innerHTML = `<div class="empty"><div class="glyph"></div><h3>No data yet</h3>
-      <p>Charts appear once you've logged a session. You can also import a backup from Settings.</p>
-      <a class="btn btn-primary" href="#/log">Start a session</a></div>`;
+    root.innerHTML = `<div class="empty"><div class="glyph"></div><h3>${esc(t('progress.noData'))}</h3>
+      <p>${esc(t('progress.noDataBody'))}</p>
+      <a class="btn btn-primary" href="#/log">${esc(t('history.startSession'))}</a></div>`;
     return;
   }
   const buckets = S.weeklyBuckets(state.sessions, state.byId, 12);
@@ -1103,45 +1143,47 @@ function renderOverview(root) {
 
   root.innerHTML = `
     <div class="stat-grid">
-      <div class="stat accent"><span class="k">Week streak</span>
-        <span class="v">${streak}<small>wk</small></span>
-        <span class="m">${streak ? 'consecutive weeks trained' : 'train this week to start one'}</span></div>
-      <div class="stat"><span class="k">This week</span>
+      <div class="stat accent"><span class="k">${esc(t('progress.weekStreak'))}</span>
+        <span class="v">${streak}<small>${esc(t('progress.weekShort'))}</small></span>
+        <span class="m">${esc(streak ? t('progress.streakOn') : t('progress.streakOff'))}</span></div>
+      <div class="stat"><span class="k">${esc(t('progress.thisWeek'))}</span>
         <span class="v">${thisWeek.sessions}<small>×</small></span>
-        <span class="m">${esc(S.fmtVolume(thisWeek.volume, unit()))} moved</span></div>
-      <div class="stat"><span class="k">Last 12 weeks</span>
-        <span class="v">${buckets.reduce((t, b) => t + b.sessions, 0)}</span>
-        <span class="m">sessions logged</span></div>
-      <div class="stat"><span class="k">Volume 12wk</span>
+        <span class="m">${esc(t('progress.moved', { volume: S.fmtVolume(thisWeek.volume, unit()) }))}</span></div>
+      <div class="stat"><span class="k">${esc(t('progress.last12'))}</span>
+        <span class="v">${buckets.reduce((sum, b) => sum + b.sessions, 0)}</span>
+        <span class="m">${esc(t('progress.sessionsLogged'))}</span></div>
+      <div class="stat"><span class="k">${esc(t('progress.volume12'))}</span>
         <span class="v">${total12 >= 10000 ? `${S.fmtNum(total12 / 1000, 1)}k` : S.fmtNum(total12, 0)}<small>${esc(unit())}</small></span>
-        <span class="m">weight × reps, warmups out</span></div>
+        <span class="m">${esc(t('progress.volumeNote'))}</span></div>
     </div>
 
     <div class="card chart-card" style="margin-top:12px">
-      <div class="chart-head"><p class="eyebrow">Sessions per week</p><span class="note">12 WK</span></div>
+      <div class="chart-head"><p class="eyebrow">${esc(t('progress.sessionsPerWeek'))}</p>
+        <span class="note">${esc(t('progress.twelveWeeks'))}</span></div>
       <div class="chart-wrap" id="c-sess"></div>
     </div>
 
     <div class="card chart-card">
-      <div class="chart-head"><p class="eyebrow">Volume per week</p><span class="note">${esc(unit().toUpperCase())}</span></div>
+      <div class="chart-head"><p class="eyebrow">${esc(t('progress.volumePerWeek'))}</p><span class="note">${esc(unit().toUpperCase())}</span></div>
       <div class="chart-wrap" id="c-vol"></div>
     </div>
 
-    <h3 class="h-sec">Going stale</h3>
-    <p class="sub" style="margin-bottom:10px">Longest since you last trained it.</p>
+    <h3 class="h-sec">${esc(t('progress.stale'))}</h3>
+    <p class="sub" style="margin-bottom:10px">${esc(t('progress.staleSub'))}</p>
     <div class="rows">${stale.map(({ e, date, days }) => `
       <button class="row ${days > 21 ? 'stale' : ''}" data-act="jump-exercise" data-id="${esc(e.id)}">
         <span class="grow"><span class="t">${esc(e.name)}</span>
-          <span class="s">${esc(e.muscleGroup || 'Uncategorised')}</span></span>
-        <span class="r">${days}<em>days</em></span>
+          <span class="s">${esc(e.muscleGroup || t('exercise.uncategorised'))}</span></span>
+        <span class="r">${days}<em>${esc(t('progress.daysShort'))}</em></span>
       </button>`).join('')}</div>`;
 
-  barChart($('#c-sess'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: b.sessions, sub: `week of ${b.label}` })), {
+  const weekOf = (b) => t('progress.weekOf', { label: b.label });
+  barChart($('#c-sess'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: b.sessions, sub: weekOf(b) })), {
     height: 140, integer: true,
-    format: (v) => `${v} session${v === 1 ? '' : 's'}`,
+    format: (v) => plural('count.sessions', v),
     tickFormat: (v) => String(Math.round(v)),
   });
-  barChart($('#c-vol'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: Math.round(b.volume), sub: `week of ${b.label}` })), {
+  barChart($('#c-vol'), buckets.map((b) => ({ x: b.start.getTime(), label: b.label, value: Math.round(b.volume), sub: weekOf(b) })), {
     height: 150, format: (v) => S.fmtVolume(v, unit()),
     tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))),
   });
@@ -1197,8 +1239,8 @@ function progressBoost(full, bodyweight) {
 
 function renderExerciseProgress(root) {
   if (!state.exercises.length) {
-    root.innerHTML = `<div class="empty"><div class="glyph"></div><h3>No exercises yet</h3>
-      <p>Add one while logging a session and its charts build themselves.</p></div>`;
+    root.innerHTML = `<div class="empty"><div class="glyph"></div><h3>${esc(t('progress.noExercises'))}</h3>
+      <p>${esc(t('progress.noExercisesBody'))}</p></div>`;
     return;
   }
   if (!state.progressEx || !state.byId.has(state.progressEx)) {
@@ -1218,77 +1260,81 @@ function renderExerciseProgress(root) {
 
   root.innerHTML = `
     <button class="btn btn-block" data-act="choose-progress-ex" style="justify-content:space-between">
-      <span>${esc(ex.name)}</span><span style="color:var(--mist);font-size:13px">change</span>
+      <span>${esc(ex.name)}</span><span style="color:var(--mist);font-size:13px">${esc(t('action.change'))}</span>
     </button>
     <div class="chips" style="margin-top:12px">
       ${S.WINDOWS.map((w) => `<button class="chip" data-act="window" data-v="${w.id}"
-        aria-pressed="${state.progressWindow === w.id}">${w.label}</button>`).join('')}
+        aria-pressed="${state.progressWindow === w.id}">${esc(w.label)}</button>`).join('')}
     </div>
 
-    ${full.length === 0 ? `<div class="empty"><div class="glyph"></div><h3>Not trained yet</h3>
-      <p>Log a set of ${esc(ex.name)} and its history starts here.</p></div>` : `
+    ${full.length === 0 ? `<div class="empty"><div class="glyph"></div><h3>${esc(t('progress.notTrained'))}</h3>
+      <p>${esc(t('progress.notTrainedBody', { name: ex.name }))}</p></div>` : `
 
     <div class="card chart-card">
-      <div class="chart-head"><p class="eyebrow">${bodyweight ? 'Best set reps' : 'Estimated 1RM'}</p>
-        <span class="note">${bodyweight ? 'REPS' : 'EPLEY · W × (1 + R/30)'}</span></div>
+      <div class="chart-head"><p class="eyebrow">${esc(bodyweight
+        ? t('progress.bestSetReps') : t('metric.e1rm.label'))}</p>
+        <span class="note">${esc(bodyweight ? t('progress.repsAxis') : t('progress.epley'))}</span></div>
       <div class="chart-wrap" id="c-1rm"></div>
     </div>
 
     ${bodyweight ? '' : `<div class="card chart-card">
-      <div class="chart-head"><p class="eyebrow">Every set</p>
-        <span class="note">LINE REPS · BARS ${esc(unit().toUpperCase())}</span></div>
+      <div class="chart-head"><p class="eyebrow">${esc(t('progress.everySet'))}</p>
+        <span class="note">${esc(t('progress.everySetNote', { unit: unit().toUpperCase() }))}</span></div>
       <div class="chart-wrap" id="c-sets"></div>
     </div>`}
 
     <div class="card chart-card">
-      <div class="chart-head"><p class="eyebrow">Volume per session</p>
-        <span class="note">${trend
-          ? esc(trend.ready ? `${trend.label} · WARMUPS OUT` : `${trend.label} · NEEDS ${trend.period}+`)
-          : 'WARMUPS EXCLUDED'}</span></div>
+      <div class="chart-head"><p class="eyebrow">${esc(t('progress.volumePerSession'))}</p>
+        <span class="note">${esc(trend
+          ? (trend.ready
+            ? t('progress.warmupsOut', { label: trend.label })
+            : t('progress.trendNeeds', { label: trend.label, n: trend.period }))
+          : t('progress.warmupsExcluded'))}</span></div>
       <div class="chart-wrap" id="c-svol"></div>
     </div>
 
     ${bodyweight ? '' : `<div class="card chart-card">
-      <div class="chart-head"><p class="eyebrow">Top set weight</p><span class="note">${esc(unit().toUpperCase())}</span></div>
+      <div class="chart-head"><p class="eyebrow">${esc(t('progress.topSetWeight'))}</p><span class="note">${esc(unit().toUpperCase())}</span></div>
       <div class="chart-wrap" id="c-top"></div>
     </div>`}
 
-    ${!boostHead ? '' : `<h3 class="h-sec">Next target</h3>
+    ${!boostHead ? '' : `<h3 class="h-sec">${esc(t('progress.nextTarget'))}</h3>
     <div class="stat accent next" style="margin-bottom:10px">
-      <span class="k">Next target · ${esc(boost.metric.short)}</span>
+      <span class="k">${esc(t('progress.nextTargetOf', { metric: boost.metric.short }))}</span>
       <span class="v">${esc(boostHead.v)}${boostHead.small
         ? `<small>${esc(boostHead.small)}</small>` : ''}</span>
       <span class="m">${esc([
-        `beats ${boostValue(boost, boost.target)}`,
-        `stood ${boost.stood} day${boost.stood === 1 ? '' : 's'}`,
-        boost.streak >= 1 ? `${boost.streak + 1} sessions climbing` : '',
+        t('progress.beats', { value: boostValue(boost, boost.target) }),
+        plural('progress.stood', boost.stood),
+        boost.streak >= 1 ? t('boost.climbing', { n: boost.streak + 1 }) : '',
       ].filter(Boolean).join(' · '))}</span>
     </div>`}
 
-    <h3 class="h-sec">Personal records</h3>
+    <h3 class="h-sec">${esc(t('progress.records'))}</h3>
     <div class="stat-grid" style="margin-bottom:10px">
-      <div class="stat accent"><span class="k">Best e1RM</span>
+      <div class="stat accent"><span class="k">${esc(t('progress.bestE1rm'))}</span>
         <span class="v">${pr.e1rm ? S.fmtNum(pr.e1rm.value, 1) : '—'}<small>${esc(unit())}</small></span>
-        <span class="m">${pr.e1rm && pr.e1rm.set ? `${S.fmtNum(pr.e1rm.set.weight)}×${pr.e1rm.set.reps} · ${esc(S.fmtDate(pr.e1rm.date))}` : 'no data'}</span></div>
-      <div class="stat"><span class="k">Heaviest set</span>
+        <span class="m">${pr.e1rm && pr.e1rm.set ? `${S.fmtNum(pr.e1rm.set.weight)}×${pr.e1rm.set.reps} · ${esc(S.fmtDate(pr.e1rm.date))}` : esc(t('word.noData'))}</span></div>
+      <div class="stat"><span class="k">${esc(t('metric.weight.label'))}</span>
         <span class="v">${pr.weight ? S.fmtNum(pr.weight.value) : '—'}<small>${esc(unit())}</small></span>
-        <span class="m">${pr.weight ? `${pr.weight.reps} reps · ${esc(S.fmtDate(pr.weight.date))}` : 'no data'}</span></div>
+        <span class="m">${pr.weight ? `${esc(t('count.reps', { n: pr.weight.reps }))} · ${esc(S.fmtDate(pr.weight.date))}` : esc(t('word.noData'))}</span></div>
     </div>
-    <p class="eyebrow">Heaviest at each rep count</p>
+    <p class="eyebrow">${esc(t('progress.heaviestPerReps'))}</p>
     <div class="pr-list">
-      ${S.REP_TARGETS.map((t) => {
-        const p = pr.byReps[t];
-        return `<div class="pr"><div class="k">${t}+ reps</div>
+      ${S.REP_TARGETS.map((target) => {
+        const p = pr.byReps[target];
+        return `<div class="pr"><div class="k">${esc(t('progress.repsPlus', { n: target }))}</div>
           <div class="v" style="${p ? '' : 'color:var(--dim)'}">${p ? S.fmtNum(p.value) : '—'}</div></div>`;
       }).join('')}
     </div>
-    <p class="meta">${pr.sessions} sessions · ${pr.totalSets} working sets logged</p>`}`;
+    <p class="meta">${esc(t('progress.setsLogged', {
+      sessions: pr.sessions, sets: pr.totalSets }))}</p>`}`;
 
   if (!full.length) return;
 
   // `label` is the tooltip text, `xlab` the short form printed on the axis.
   const label = (p) => S.fmtDate(p.date);
-  const empty = 'No sessions in this window. Try a wider range.';
+  const empty = t('progress.emptyWindow');
   // Every chart here plots the same sessions on the same x scale, so they act
   // as one figure: picking a session in any of them marks it in all of them.
   const sync = 'progress-exercise';
@@ -1299,7 +1345,8 @@ function renderExerciseProgress(root) {
       y: bodyweight ? p.sets.reduce((m, s) => Math.max(m, s.reps), 0) : p.e1rm,
       label: label(p), xlab: label(p),
     })),
-    { format: (v) => (bodyweight ? `${S.fmtNum(v, 0)} reps` : `${S.fmtNum(v, 1)} ${unit()}`),
+    { format: (v) => (bodyweight
+      ? t('count.reps', { n: S.fmtNum(v, 0) }) : `${S.fmtNum(v, 1)} ${unit()}`),
       tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
 
   if (!bodyweight) {
@@ -1311,7 +1358,7 @@ function renderExerciseProgress(root) {
 
   barChart($('#c-svol'),
     series.map((p) => ({ x: p.ts, label: label(p), value: Math.round(p.volume), sub: label(p) })),
-    { format: (v) => S.fmtVolume(v, unit()), height: 140, valueLabel: 'Total',
+    { format: (v) => S.fmtVolume(v, unit()), height: 140, valueLabel: t('word.total'),
       overlay: trend && trend.ready ? { values: trend.values, label: trend.label } : null,
       tickFormat: (v) => (v >= 1000 ? `${S.fmtNum(v / 1000, 0)}k` : String(Math.round(v))), empty, sync });
 
@@ -1319,7 +1366,8 @@ function renderExerciseProgress(root) {
     // No date in the reading — the x tick under the point carries it, and all
     // four charts read out the same session at once.
     lineChart($('#c-top'),
-      series.map((p) => ({ x: p.ts, y: p.topWeight, label: `${p.topWeightReps} reps`, xlab: label(p) })),
+      series.map((p) => ({ x: p.ts, y: p.topWeight,
+        label: t('count.reps', { n: p.topWeightReps }), xlab: label(p) })),
       { format: (v) => `${S.fmtNum(v)} ${unit()}`, tickFormat: (v) => S.fmtNum(v, 0), empty, sync });
   }
 }
@@ -1344,22 +1392,25 @@ const OPTION_EDIT = '__edit';
 /** Seconds as something readable: 45s · 2 min · 1 min 15s. */
 function fmtSeconds(v) {
   const n = Math.round(Number(v) || 0);
-  if (n < 60) return `${n}s`;
+  if (n < 60) return t('time.seconds', { n });
   const m = Math.floor(n / 60);
   const s = n % 60;
-  return s ? `${m} min ${s}s` : `${m} min`;
+  return s ? t('time.minutesSeconds', { m, s }) : t('time.minutesOnly', { m });
 }
 
+/* Every label here is a function rather than a string: they are read whenever
+   a sheet is built, and both the language and the weight unit can have moved
+   since the module was evaluated. */
 const OPTION_LISTS = {
   restTimerSeconds: {
     key: 'restTimerOptions',
     defaults: db.DEFAULT_REST_OPTIONS,
-    title: 'Rest timer values',
-    body: 'What the Rest timer dropdown offers. Anything from 5 seconds to an hour.',
-    addLabel: 'Add a value, in seconds',
+    title: () => t('options.rest.title'),
+    body: () => t('options.rest.body'),
+    addLabel: () => t('options.rest.add'),
     placeholder: '75',
     inputMode: 'numeric',
-    invalid: 'Enter a whole number of seconds between 5 and 3600.',
+    invalid: () => t('options.rest.invalid'),
     clean: (v) => {
       const n = Math.round(Number(String(v).replace(',', '.')));
       return isFinite(n) && n >= 5 && n <= 3600 ? n : null;
@@ -1369,34 +1420,36 @@ const OPTION_LISTS = {
   weightStep: {
     key: 'weightStepOptions',
     defaults: db.DEFAULT_WEIGHT_STEPS,
-    title: 'Weight step values',
-    body: 'What one tap of − or + moves a weight by. Match it to the smallest plate pair you own.',
-    addLabel: () => `Add a value, in ${unit()}`,
+    title: () => t('options.step.title'),
+    body: () => t('options.step.body'),
+    addLabel: () => t('options.step.add', { unit: unit() }),
     placeholder: '1.25',
     inputMode: 'decimal',
-    invalid: 'Enter a weight between 0.25 and 100.',
+    invalid: () => t('options.step.invalid'),
     clean: (v) => {
       const n = Math.round(Number(String(v).replace(',', '.')) * 100) / 100;
       return isFinite(n) && n >= 0.25 && n <= 100 ? n : null;
     },
-    // Not fmtNum: it pads to the requested places, and 2.50 kg beside 1 kg
-    // reads as a precision the plates do not have. clean() already rounded.
-    format: (v) => `${v} ${unit()}`,
+    // fmtDec, not fmtNum: the latter pads to its decimal places, and 2,50 kg
+    // beside 1 kg reads as a precision the plates do not have. clean()
+    // already rounded.
+    format: (v) => `${S.fmtDec(v)} ${unit()}`,
   },
   volumeTrendPeriod: {
     key: 'volumeTrendPeriodOptions',
     defaults: db.DEFAULT_TREND_PERIODS,
-    title: 'Trend line lengths',
-    body: 'How many sessions the moving average is taken over. Nothing is drawn until you have that many, so a long average on a short history draws nothing at all.',
-    addLabel: 'Add a length, in sessions',
+    title: () => t('options.trend.title'),
+    body: () => t('options.trend.body'),
+    addLabel: () => t('options.trend.add'),
     placeholder: '6',
     inputMode: 'numeric',
-    invalid: `Enter a whole number of sessions between ${S.MA_PERIOD_MIN} and ${S.MA_PERIOD_MAX}.`,
+    invalid: () => t('options.trend.invalid', {
+      min: S.MA_PERIOD_MIN, max: S.MA_PERIOD_MAX }),
     clean: (v) => {
       const n = Math.round(Number(String(v).replace(',', '.')));
       return isFinite(n) && n >= S.MA_PERIOD_MIN && n <= S.MA_PERIOD_MAX ? n : null;
     },
-    format: (v) => `${v} sessions`,
+    format: (v) => t('options.trend.format', { n: v }),
   },
 };
 
@@ -1441,7 +1494,7 @@ function optionSelectHtml(id, domId) {
   return `<select class="input" id="${domId}" data-pref="${id}" data-options="${id}">
       ${optionValues(id).map((v) => `<option value="${v}"
         ${v === current ? 'selected' : ''}>${esc(spec.format(v))}</option>`).join('')}
-      <option value="${OPTION_EDIT}">Edit this list…</option>
+      <option value="${OPTION_EDIT}">${esc(t('options.edit'))}</option>
     </select>`;
 }
 
@@ -1469,38 +1522,38 @@ function editOptionsSheet(id) {
       <span class="opt-v">${esc(spec.format(v))}</span>
       ${values.length > 1
         ? `<button class="btn btn-sm btn-quiet" data-rm="${v}"
-             aria-label="Remove ${esc(spec.format(v))}">Remove</button>`
-        : `<span class="opt-note">the last one</span>`}
+             aria-label="${esc(t('options.removeAria', { value: spec.format(v) }))}">${esc(t('action.remove'))}</button>`
+        : `<span class="opt-note">${esc(t('options.lastOne'))}</span>`}
     </div>`).join('');
 
   openSheet(`
-    <h2>${esc(spec.title)}</h2>
-    <p class="sub">${esc(spec.body)}</p>
+    <h2>${esc(optionLabel(spec, 'title'))}</h2>
+    <p class="sub">${esc(optionLabel(spec, 'body'))}</p>
     <div class="opt-list" data-list>${rowsHtml(optionValues(id))}</div>
     <div class="field" style="margin-top:14px">
       <label for="opt-add">${esc(optionLabel(spec, 'addLabel'))}</label>
       <div class="btn-row">
         <input class="input" id="opt-add" inputmode="${spec.inputMode}"
                enterkeyhint="done" autocomplete="off" placeholder="${esc(spec.placeholder)}">
-        <button class="btn" data-x="add" style="flex:0 0 auto">Add</button>
+        <button class="btn" data-x="add" style="flex:0 0 auto">${esc(t('action.add'))}</button>
       </div>
     </div>
     <div class="btn-row" style="margin-top:4px">
-      <button class="btn btn-sm btn-quiet" data-x="reset">Reset to defaults</button>
-      <button class="btn btn-sm btn-primary" data-x="done">Done</button>
+      <button class="btn btn-sm btn-quiet" data-x="reset">${esc(t('options.reset'))}</button>
+      <button class="btn btn-sm btn-primary" data-x="done">${esc(t('action.done'))}</button>
     </div>`, (root) => {
     const input = $('#opt-add', root);
     const redraw = (values) => { $('[data-list]', root).innerHTML = rowsHtml(values); };
 
     const add = () => {
       const n = spec.clean(input.value);
-      if (n == null) { toast(spec.invalid); return; }
+      if (n == null) { toast(optionLabel(spec, 'invalid')); return; }
       const values = optionValues(id);
-      if (values.includes(n)) { toast(`${spec.format(n)} is already in the list`); return; }
-      if (values.length >= OPTION_MAX) { toast(`That is as many as the list holds (${OPTION_MAX})`); return; }
+      if (values.includes(n)) { toast(t('options.duplicate', { value: spec.format(n) })); return; }
+      if (values.length >= OPTION_MAX) { toast(t('options.full', { max: OPTION_MAX })); return; }
       redraw(saveOptions(id, values.concat([n])));
       input.value = '';
-      toast(`Added ${spec.format(n)}`);
+      toast(t('options.added', { value: spec.format(n) }));
     };
 
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
@@ -1510,7 +1563,7 @@ function editOptionsSheet(id) {
       if (rm) {
         const gone = Number(rm.dataset.rm);
         redraw(saveOptions(id, optionValues(id).filter((v) => v !== gone)));
-        toast(`Removed ${spec.format(gone)}`);
+        toast(t('options.removed', { value: spec.format(gone) }));
         return;
       }
       const b = e.target.closest('[data-x]');
@@ -1518,7 +1571,7 @@ function editOptionsSheet(id) {
       if (b.dataset.x === 'add') add();
       if (b.dataset.x === 'reset') {
         redraw(saveOptions(id, spec.defaults.slice()));
-        toast('List reset');
+        toast(t('options.wasReset'));
       }
       if (b.dataset.x === 'done') { closeSheet(); render(); }
     });
@@ -1540,147 +1593,151 @@ async function viewSettings() {
   const boost = S.boostMetric(state.settings.boostMetric);
 
   $('#view').innerHTML = `
-    <p class="eyebrow">Settings</p>
-    <h2 class="h-big">Preferences &amp; data</h2>
-    <p class="sub">${state.sessions.length} sessions · ${state.exercises.length} exercises · stored on this device only.</p>
+    <p class="eyebrow">${esc(t('settings.eyebrow'))}</p>
+    <h2 class="h-big">${esc(t('settings.title'))}</h2>
+    <p class="sub">${esc(t('settings.sub', {
+      sessions: state.sessions.length, exercises: state.exercises.length }))}</p>
 
     ${daysSinceExport === null || daysSinceExport >= EXPORT_NAG_DAYS ? `<div class="hint" style="margin-top:16px">
-      <div><b>Export a backup.</b> ${daysSinceExport === null
-        ? 'You have never exported. iOS can clear a site\'s storage on its own — a file in your Files app is the only real safety net.'
-        : `Last export was ${daysSinceExport} days ago.`}</div></div>` : `<p class="meta" style="text-align:left;padding:14px 0 0">
-      Last export ${daysSinceExport} day${daysSinceExport === 1 ? '' : 's'} ago.</p>`}
+      <div><b>${esc(t('settings.exportNag'))}</b> ${daysSinceExport === null
+        ? esc(t('settings.neverExported'))
+        : esc(t('settings.lastExportWas', { n: daysSinceExport }))}</div></div>`
+      : `<p class="meta" style="text-align:left;padding:14px 0 0">
+      ${esc(plural('settings.lastExport', daysSinceExport))}</p>`}
 
     <div class="btn-row" style="margin-top:14px">
-      <button class="btn btn-primary" data-act="export">Export backup</button>
-      <button class="btn" data-act="import">Import backup</button>
+      <button class="btn btn-primary" data-act="export">${esc(t('settings.exportBackup'))}</button>
+      <button class="btn" data-act="import">${esc(t('settings.importBackup'))}</button>
     </div>
     <div class="btn-row" style="margin-top:8px">
-      <button class="btn btn-sm" data-act="export-csv">Export CSV</button>
-      <button class="btn btn-sm" data-act="import-csv">Import CSV</button>
+      <button class="btn btn-sm" data-act="export-csv">${esc(t('settings.exportCsv'))}</button>
+      <button class="btn btn-sm" data-act="import-csv">${esc(t('settings.importCsv'))}</button>
       <button type="button" class="icon-btn" data-act="data-info" style="flex:0 0 auto"
-        aria-label="About export and import">${ICON_INFO}</button>
+        aria-label="${esc(t('settings.dataInfoAria'))}">${ICON_INFO}</button>
     </div>
     <input type="file" id="file-json" accept=".json,application/json" hidden>
     <input type="file" id="file-csv" accept=".csv,text/csv,text/plain" hidden>
 
-    <h3 class="h-sec">Appearance</h3>
+    <h3 class="h-sec">${esc(t('settings.appearance'))}</h3>
     <div class="card card-pad">
-      <div class="field" style="margin-bottom:0">
-        <label for="p-theme">Theme</label>
+      <div class="field">
+        <label for="p-theme">${esc(t('settings.theme'))}</label>
         <select class="input" id="p-theme" data-pref="theme">
-          ${THEMES.map((t) => `<option value="${t.id}"
-            ${state.settings.theme === t.id ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+          ${THEMES.map((th) => `<option value="${th.id}"
+            ${state.settings.theme === th.id ? 'selected' : ''}>${esc(th.label)}</option>`).join('')}
         </select>
         <p class="meta" style="text-align:left;padding:6px 0 0">
-          The ${effectiveTheme() === 'dark' ? 'sun' : 'moon'} beside the wordmark flips it without coming here.</p>
+          ${esc(t('settings.themeNote', {
+            glyph: t(effectiveTheme() === 'dark' ? 'theme.sun' : 'theme.moon') }))}</p>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="p-lang">${esc(t('settings.language'))}</label>
+        <select class="input" id="p-lang" data-pref="lang">
+          ${LANGS.map((l) => `<option value="${l.id}"
+            ${getLang() === l.id ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          ${esc(t('settings.languageNote', { code: t('lang.otherShort') }))}</p>
       </div>
     </div>
 
-    <h3 class="h-sec">Preferences</h3>
+    <h3 class="h-sec">${esc(t('settings.preferences'))}</h3>
     <div class="card card-pad">
       <div class="field">
-        <label for="p-unit">Weight unit</label>
+        <label for="p-unit">${esc(t('settings.unit'))}</label>
         <select class="input" id="p-unit" data-pref="unit">
-          <option value="kg" ${unit() === 'kg' ? 'selected' : ''}>Kilograms (kg)</option>
-          <option value="lb" ${unit() === 'lb' ? 'selected' : ''}>Pounds (lb)</option>
+          <option value="kg" ${unit() === 'kg' ? 'selected' : ''}>${esc(t('settings.kg'))}</option>
+          <option value="lb" ${unit() === 'lb' ? 'selected' : ''}>${esc(t('settings.lb'))}</option>
         </select>
       </div>
       <div class="field">
-        <label for="p-wstep">Weight step</label>
+        <label for="p-wstep">${esc(t('settings.weightStep'))}</label>
         ${optionSelectHtml('weightStep', 'p-wstep')}
       </div>
       <div class="field">
-        <label for="p-rstep">Rep step</label>
+        <label for="p-rstep">${esc(t('settings.repStep'))}</label>
         <input class="input" id="p-rstep" data-pref="repStep" inputmode="numeric" value="${state.settings.repStep}">
       </div>
       <div class="field">
-        <label for="p-rest">Rest timer</label>
+        <label for="p-rest">${esc(t('settings.restTimer'))}</label>
         ${optionSelectHtml('restTimerSeconds', 'p-rest')}
       </div>
       <div class="field" style="margin-bottom:0">
-        <label for="p-auto">Start rest timer automatically</label>
+        <label for="p-auto">${esc(t('settings.restAuto'))}</label>
         <select class="input" id="p-auto" data-pref="restTimerAuto">
-          <option value="yes" ${state.settings.restTimerAuto ? 'selected' : ''}>Yes, when I mark a set done</option>
-          <option value="no" ${!state.settings.restTimerAuto ? 'selected' : ''}>No, never</option>
+          <option value="yes" ${state.settings.restTimerAuto ? 'selected' : ''}>${esc(t('settings.restAutoYes'))}</option>
+          <option value="no" ${!state.settings.restTimerAuto ? 'selected' : ''}>${esc(t('settings.restAutoNo'))}</option>
         </select>
         <p class="meta" style="text-align:left;padding:6px 0 0">
-          Weight step and Rest timer end in “Edit this list…”, where you can add
-          or remove the values they offer. So does Averaged over, below.</p>
+          ${esc(t('settings.editListNote'))}</p>
       </div>
     </div>
 
-    <h3 class="h-sec">Motivation</h3>
+    <h3 class="h-sec">${esc(t('settings.motivation'))}</h3>
     <div class="card card-pad">
       <div class="field" style="margin-bottom:0">
-        <label for="p-boost">Target to beat</label>
+        <label for="p-boost">${esc(t('settings.boostMetric'))}</label>
         <select class="input" id="p-boost" data-pref="boostMetric">
           ${S.BOOST_METRICS.map((m) => `<option value="${m.id}"
             ${boost.id === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
         </select>
-        <p class="meta" style="text-align:left;padding:6px 0 0">${esc(BOOST_NOTES[boost.id])}</p>
+        <p class="meta" style="text-align:left;padding:6px 0 0">${esc(boostNote(boost.id))}</p>
       </div>
     </div>
 
-    <h3 class="h-sec">Plot settings</h3>
+    <h3 class="h-sec">${esc(t('settings.plot'))}</h3>
     <div class="card card-pad">
       <div class="field" ${trendMode.id === 'off' ? 'style="margin-bottom:0"' : ''}>
-        <label for="p-trend">Volume trend line</label>
+        <label for="p-trend">${esc(t('settings.trend'))}</label>
         <select class="input" id="p-trend" data-pref="volumeTrend">
           ${S.MA_MODES.map((m) => `<option value="${m.id}"
             ${trendMode.id === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
         </select>
         <p class="meta" style="text-align:left;padding:6px 0 0">
-          Drawn over Volume per session in Progress → Per exercise.</p>
+          ${esc(t('settings.trendNote'))}</p>
       </div>
       ${trendMode.id === 'off' ? '' : `<div class="field" style="margin-bottom:0">
-        <label for="p-trend-n">Averaged over</label>
+        <label for="p-trend-n">${esc(t('settings.trendPeriod'))}</label>
         ${optionSelectHtml('volumeTrendPeriod', 'p-trend-n')}
         <p class="meta" style="text-align:left;padding:6px 0 0">
-          ${esc(trendMode.id === 'ema'
-            ? `Each session weighted 2/(${trendPeriod}+1), seeded with the plain average of the first ${trendPeriod}.`
-            : `The mean of every ${trendPeriod} consecutive sessions. Nothing is drawn until there are ${trendPeriod}.`)}</p>
+          ${esc(t(trendMode.id === 'ema' ? 'settings.emaNote' : 'settings.smaNote',
+            { n: trendPeriod }))}</p>
       </div>`}
     </div>
 
-    <h3 class="h-sec">Routines</h3>
-    <a class="btn btn-block" href="#/routines">Manage routines${state.routines.length
+    <h3 class="h-sec">${esc(t('settings.routines'))}</h3>
+    <a class="btn btn-block" href="#/routines">${esc(t('settings.manageRoutines'))}${state.routines.length
       ? ` <span style="color:var(--mist)">· ${state.routines.length}</span>` : ''}</a>
 
-    <h3 class="h-sec">Exercises</h3>
-    <a class="btn btn-block" href="#/exercises">Manage exercise list</a>
+    <h3 class="h-sec">${esc(t('settings.exercises'))}</h3>
+    <a class="btn btn-block" href="#/exercises">${esc(t('settings.manageExercises'))}</a>
 
-    <h3 class="h-sec">Storage</h3>
+    <h3 class="h-sec">${esc(t('settings.storage'))}</h3>
     <div class="card card-pad">
       <p class="sub" style="margin:0 0 6px">
-        ${persisted ? 'Marked persistent — the browser will not evict this data casually.'
-                    : 'Not marked persistent. Add to the Home Screen and keep exporting.'}
+        ${esc(persisted ? t('settings.persisted') : t('settings.notPersisted'))}
       </p>
       ${est && est.usage != null ? `<p class="meta" style="text-align:left;padding:0">
-        ${(est.usage / 1048576).toFixed(2)} MB used${est.quota ? ` of ${(est.quota / 1048576).toFixed(0)} MB available` : ''}</p>` : ''}
+        ${esc(t('settings.storageUsed', { used: (est.usage / 1048576).toFixed(2) }))}${
+          est.quota ? esc(t('settings.storageOf', { quota: (est.quota / 1048576).toFixed(0) })) : ''}</p>` : ''}
     </div>
 
-    <h3 class="h-sec">App</h3>
+    <h3 class="h-sec">${esc(t('settings.app'))}</h3>
     <div class="btn-row">
-      <button class="btn" data-act="reload-app">Reload app</button>
-      <button class="btn" data-act="check-update">Check for update</button>
+      <button class="btn" data-act="reload-app">${esc(t('settings.reloadApp'))}</button>
+      <button class="btn" data-act="check-update">${esc(t('settings.checkUpdate'))}</button>
     </div>
-    <button class="btn btn-block btn-sm" style="margin-top:8px" data-act="clear-cache">Clear offline cache</button>
-    <p class="meta" style="text-align:left;padding:6px 0 0">
-      Reload app reopens the page as it is right now. Check for update asks the
-      server for a newer version; if one exists it installs quietly in the
-      background and offers a “Reload” toast to switch to it. Clear offline
-      cache throws away every stored copy of the app and fetches it again — for
-      when the files moved but the version did not. None of the three touch
-      your sessions.</p>
+    <button class="btn btn-block btn-sm" style="margin-top:8px" data-act="clear-cache">${esc(t('settings.clearCache'))}</button>
+    <p class="meta" style="text-align:left;padding:6px 0 0">${esc(t('settings.appNote'))}</p>
 
     <hr class="sep">
     ${hasDemoData() ? `
       <button class="btn btn-danger btn-block btn-sm" style="margin-bottom:10px"
-        data-act="remove-demo">Remove sample data</button>` : ''}
-    <button class="btn btn-danger btn-block" data-act="erase">Erase all data</button>
+        data-act="remove-demo">${esc(t('settings.removeDemo'))}</button>` : ''}
+    <button class="btn btn-danger btn-block" data-act="erase">${esc(t('settings.erase'))}</button>
     <p class="meta">flexloop ·
       <button type="button" class="linkish" data-act="version">${esc(VERSION_SHORT)}</button>
-      · offline</p>`;
+      · ${esc(t('word.offline'))}</p>`;
 }
 
 function viewExercises() {
@@ -1688,64 +1745,66 @@ function viewExercises() {
   for (const s of state.sessions) {
     for (const e of s.entries || []) counts.set(e.exerciseId, (counts.get(e.exerciseId) || 0) + 1);
   }
-  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/settings">Back</a>`;
+  $('#topbar-action').innerHTML =
+    `<a class="btn btn-sm btn-quiet" href="#/settings">${esc(t('action.back'))}</a>`;
   $('#view').innerHTML = `
-    <p class="eyebrow">Exercises</p>
-    <h2 class="h-big">${state.exercises.length} in your list</h2>
-    <p class="sub">Tap one to rename it, change its group, or remove it.</p>
+    <p class="eyebrow">${esc(t('exercises.eyebrow'))}</p>
+    <h2 class="h-big">${esc(t('exercises.count', { n: state.exercises.length }))}</h2>
+    <p class="sub">${esc(t('exercises.sub'))}</p>
     <div style="height:14px"></div>
     <div class="rows">${state.exercises.map((e) => `
       <button class="row" data-act="edit-exercise" data-id="${esc(e.id)}">
         <span class="grow"><span class="t">${esc(e.name)}</span>
-          <span class="s">${esc(e.muscleGroup || 'Uncategorised')}${e.isBodyweight ? ' · bodyweight' : ''}</span></span>
-        <span class="r">${counts.get(e.id) || 0}<em>sess</em></span>
-      </button>`).join('') || '<div class="empty" style="padding:26px"><p style="margin:0">No exercises yet.</p></div>'}</div>`;
+          <span class="s">${esc(e.muscleGroup || t('exercise.uncategorised'))}${
+            e.isBodyweight ? ` · ${esc(t('word.bodyweight'))}` : ''}</span></span>
+        <span class="r">${counts.get(e.id) || 0}<em>${esc(t('exercises.sessShort'))}</em></span>
+      </button>`).join('') || `<div class="empty" style="padding:26px"><p style="margin:0">${esc(t('exercises.none'))}</p></div>`}</div>`;
 }
 
 function editExerciseSheet(id) {
   const ex = state.byId.get(id);
   if (!ex) return;
   openSheet(`
-    <h2>Edit exercise</h2>
-    <div class="field"><label for="e-name">Name</label>
+    <h2>${esc(t('exercises.editTitle'))}</h2>
+    <div class="field"><label for="e-name">${esc(t('exercises.name'))}</label>
       <input class="input" id="e-name" value="${esc(ex.name)}" autocapitalize="words"></div>
-    <div class="field"><label for="e-group">Muscle group</label>
-      <input class="input" id="e-group" value="${esc(ex.muscleGroup || '')}" placeholder="Legs, Back, Push…" autocapitalize="words"></div>
-    <div class="field"><label for="e-bw">Loading</label>
+    <div class="field"><label for="e-group">${esc(t('exercises.group'))}</label>
+      <input class="input" id="e-group" value="${esc(ex.muscleGroup || '')}" placeholder="${esc(t('exercises.groupPlaceholder'))}" autocapitalize="words"></div>
+    <div class="field"><label for="e-bw">${esc(t('exercises.loading'))}</label>
       <select class="input" id="e-bw">
-        <option value="no" ${ex.isBodyweight ? '' : 'selected'}>Weighted</option>
-        <option value="yes" ${ex.isBodyweight ? 'selected' : ''}>Bodyweight — track reps only</option>
+        <option value="no" ${ex.isBodyweight ? '' : 'selected'}>${esc(t('exercises.weighted'))}</option>
+        <option value="yes" ${ex.isBodyweight ? 'selected' : ''}>${esc(t('exercises.bodyweightOption'))}</option>
       </select></div>
     <div class="btn-row" style="margin-top:16px">
-      <button class="btn" data-close>Cancel</button>
-      <button class="btn btn-primary" data-x="save">Save</button>
+      <button class="btn" data-close>${esc(t('action.cancel'))}</button>
+      <button class="btn btn-primary" data-x="save">${esc(t('action.save'))}</button>
     </div>
-    <button class="btn btn-danger btn-block btn-sm" style="margin-top:10px" data-x="del">Delete exercise</button>`,
+    <button class="btn btn-danger btn-block btn-sm" style="margin-top:10px" data-x="del">${esc(t('exercises.delete'))}</button>`,
   (root) => {
     root.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-x]');
       if (!b) return;
       if (b.dataset.x === 'save') {
         ex.name = $('#e-name', root).value.trim() || ex.name;
-        ex.muscleGroup = $('#e-group', root).value.trim() || 'Uncategorised';
+        ex.muscleGroup = $('#e-group', root).value.trim() || t('exercise.uncategorised');
         ex.isBodyweight = $('#e-bw', root).value === 'yes';
         await db.saveExercise(ex);
         closeSheet();
         await reload();
         render();
-        toast('Exercise saved');
+        toast(t('exercises.saved'));
       } else {
         closeSheet();
         const ok = await confirmSheet({
-          title: `Delete ${ex.name}?`,
-          body: 'The exercise disappears from your list. Sets already logged in past sessions stay, but show as a removed exercise.',
-          confirm: 'Delete', danger: true,
+          title: t('exercises.deleteTitle', { name: ex.name }),
+          body: t('exercises.deleteBody'),
+          confirm: t('action.delete'), danger: true,
         });
         if (!ok) return;
         await db.deleteExercise(ex.id);
         await reload();
         render();
-        toast('Exercise deleted');
+        toast(t('exercises.deleted'));
       }
     });
   });
@@ -1771,7 +1830,8 @@ async function saveRoutine(r) {
 }
 
 function viewRoutines() {
-  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/settings">Back</a>`;
+  $('#topbar-action').innerHTML =
+    `<a class="btn btn-sm btn-quiet" href="#/settings">${esc(t('action.back'))}</a>`;
   const rows = state.routines.map((r) => `
     <button class="row" data-act="open-routine" data-id="${esc(r.id)}">
       <span class="grow">
@@ -1780,62 +1840,62 @@ function viewRoutines() {
       </span>
       <span class="r">${r.lastUsedAt
         ? esc(S.relativeDays(S.localDate(new Date(r.lastUsedAt))))
-        : 'new'}</span>
+        : esc(t('word.new'))}</span>
     </button>`).join('');
 
   $('#view').innerHTML = `
-    <p class="eyebrow">Routines</p>
-    <h2 class="h-big">${state.routines.length} saved</h2>
-    <p class="sub">An ordered list of exercises. Starting one opens a session with
-      every set already laid out, prefilled from the last time you trained it.</p>
+    <p class="eyebrow">${esc(t('routines.eyebrow'))}</p>
+    <h2 class="h-big">${esc(t('routines.saved', { n: state.routines.length }))}</h2>
+    <p class="sub">${esc(t('routines.sub'))}</p>
     <div style="height:14px"></div>
-    <button class="btn btn-block" data-act="new-routine">+ New routine</button>
+    <button class="btn btn-block" data-act="new-routine">${esc(t('routines.new'))}</button>
     ${state.routines.length ? `<div style="height:12px"></div><div class="rows">${rows}</div>`
-      : `<div class="empty"><div class="glyph"></div><h3>No routines yet</h3>
-         <p>Build one here, or tap “Save as routine” at the bottom of any session
-            to keep the exercises you just did.</p></div>`}`;
+      : `<div class="empty"><div class="glyph"></div><h3>${esc(t('routines.none'))}</h3>
+         <p>${esc(t('routines.noneBody'))}</p></div>`}`;
 }
 
 function viewRoutine(id) {
   const r = routineById(id);
   const view = $('#view');
   if (!r) {
-    view.innerHTML = `<div class="empty"><div class="glyph"></div><h3>Routine not found</h3>
-      <p>It may have been deleted.</p><a class="btn" href="#/routines">Back to routines</a></div>`;
+    view.innerHTML = `<div class="empty"><div class="glyph"></div><h3>${esc(t('routine.notFound'))}</h3>
+      <p>${esc(t('session.maybeDeleted'))}</p>
+      <a class="btn" href="#/routines">${esc(t('routine.backToRoutines'))}</a></div>`;
     return;
   }
-  $('#topbar-action').innerHTML = `<a class="btn btn-sm btn-quiet" href="#/routines">Back</a>`;
+  $('#topbar-action').innerHTML =
+    `<a class="btn btn-sm btn-quiet" href="#/routines">${esc(t('action.back'))}</a>`;
   const items = r.items || [];
   const missing = items.filter((it) => !state.byId.has(it.exerciseId)).length;
 
   view.innerHTML = `
-    <p class="eyebrow">Routine</p>
+    <p class="eyebrow">${esc(t('routine.eyebrow'))}</p>
     <h2 class="h-big">${esc(r.name)}</h2>
     <p class="sub">${esc(routineSummary(r))}${missing
-      ? ` · ${missing} deleted exercise${missing === 1 ? '' : 's'}, skipped on start` : ''}</p>
+      ? ` · ${esc(plural('routine.skipped', missing))}` : ''}</p>
     <div style="height:14px"></div>
 
     ${items.length ? `<div class="rt-list">${items.map((it, i) => {
       const ex = state.byId.get(it.exerciseId);
       return `<div class="rt-item" data-i="${i}">
-        <span class="rt-name${ex ? '' : ' is-gone'}">${esc(ex ? ex.name : 'Removed exercise')}</span>
+        <span class="rt-name${ex ? '' : ' is-gone'}">${esc(ex ? ex.name : t('exercise.removed'))}</span>
         <span class="rt-sets">
-          <button class="step" data-act="routine-sets" data-d="-1" aria-label="Fewer sets">−</button>
-          <span class="rt-n">${setCountOf(it)}<em>sets</em></span>
-          <button class="step" data-act="routine-sets" data-d="1" aria-label="More sets">+</button>
+          <button class="step" data-act="routine-sets" data-d="-1" aria-label="${esc(t('routine.fewerSets'))}">−</button>
+          <span class="rt-n">${setCountOf(it)}<em>${esc(t('routine.setsShort'))}</em></span>
+          <button class="step" data-act="routine-sets" data-d="1" aria-label="${esc(t('routine.moreSets'))}">+</button>
         </span>
-        <button class="btn btn-sm btn-quiet" data-act="routine-item-menu" aria-label="Options">•••</button>
+        <button class="btn btn-sm btn-quiet" data-act="routine-item-menu" aria-label="${esc(t('action.options'))}">•••</button>
       </div>`;
     }).join('')}</div>` : `<div class="empty" style="padding:26px 10px">
-      <p style="margin:0">Nothing in this routine yet.</p></div>`}
+      <p style="margin:0">${esc(t('routine.empty'))}</p></div>`}
 
-    <button class="btn btn-block" data-act="routine-add">+ Add exercise</button>
+    <button class="btn btn-block" data-act="routine-add">${esc(t('routine.addExercise'))}</button>
     <div style="height:18px"></div>
     <button class="btn btn-primary btn-block btn-lg" data-act="start-routine" data-id="${esc(r.id)}">
-      Start this routine</button>
+      ${esc(t('routine.start'))}</button>
     <div class="btn-row" style="margin-top:10px">
-      <button class="btn btn-sm" data-act="rename-routine" data-id="${esc(r.id)}">Rename</button>
-      <button class="btn btn-sm btn-danger" data-act="delete-routine" data-id="${esc(r.id)}">Delete</button>
+      <button class="btn btn-sm" data-act="rename-routine" data-id="${esc(r.id)}">${esc(t('action.rename'))}</button>
+      <button class="btn btn-sm btn-danger" data-act="delete-routine" data-id="${esc(r.id)}">${esc(t('action.delete'))}</button>
     </div>`;
 }
 
@@ -1849,13 +1909,14 @@ function routineItemMenu(r, i) {
   const it = r.items[i];
   const ex = state.byId.get(it.exerciseId);
   openSheet(`
-    <h2>${esc(ex ? ex.name : 'Removed exercise')}</h2>
-    <p class="sub">${setCountOf(it)} set${setCountOf(it) === 1 ? '' : 's'} · position ${i + 1} of ${r.items.length}</p>
+    <h2>${esc(ex ? ex.name : t('exercise.removed'))}</h2>
+    <p class="sub">${esc(t('routine.position', {
+      sets: plural('count.sets', setCountOf(it)), i: i + 1, total: r.items.length }))}</p>
     <div class="rows" style="margin-top:14px">
-      <button class="row" data-x="up"><span class="grow"><span class="t">Move up</span></span></button>
-      <button class="row" data-x="down"><span class="grow"><span class="t">Move down</span></span></button>
-      <button class="row" data-x="rm"><span class="grow"><span class="t" style="color:var(--danger)">Remove from routine</span>
-        <span class="s">The exercise itself is untouched</span></span></button>
+      <button class="row" data-x="up"><span class="grow"><span class="t">${esc(t('routine.moveUp'))}</span></span></button>
+      <button class="row" data-x="down"><span class="grow"><span class="t">${esc(t('routine.moveDown'))}</span></span></button>
+      <button class="row" data-x="rm"><span class="grow"><span class="t" style="color:var(--danger)">${esc(t('routine.removeItem'))}</span>
+        <span class="s">${esc(t('routine.removeItemSub'))}</span></span></button>
     </div>`, (root) => {
     root.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-x]');
@@ -1881,30 +1942,34 @@ async function saveSessionAsRoutine(session) {
       sets: Math.max(1, e.sets.filter((s) => !s.isWarmup).length),
     }));
   if (!items.length) {
-    toast('Nothing to save — every exercise here has been deleted');
+    toast(t('routine.nothingToSave'));
     return;
   }
-  // Guess a name from the muscle group that dominates the session.
+  // Guess a name from the muscle group that dominates the session. A group is
+  // stored as words, so an exercise added before the language was switched
+  // still carries the other language's "Uncategorised" — neither is a name.
+  const uncategorised = variants('exercise.uncategorised');
   const tally = new Map();
   for (const it of items) {
     const g = (state.byId.get(it.exerciseId).muscleGroup || '').trim();
-    if (g && g !== 'Uncategorised') tally.set(g, (tally.get(g) || 0) + 1);
+    if (g && !uncategorised.includes(g)) tally.set(g, (tally.get(g) || 0) + 1);
   }
   const suggested = [...tally.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)[0] || '';
 
   const name = await promptSheet({
-    title: 'Save as routine',
-    body: `${items.length} exercise${items.length === 1 ? '' : 's'}, with the working sets you did today.`,
-    label: 'Routine name',
+    title: t('routine.saveTitle'),
+    body: t('routine.saveBody', { exercises: plural('count.exercises', items.length) }),
+    label: t('routine.name'),
     value: suggested,
-    placeholder: 'Push A, Legs, Upper…',
+    placeholder: t('routine.namePlaceholder'),
   });
   if (!name) return;
 
   const r = { id: uid('r'), name, items, createdAt: Date.now(), updatedAt: Date.now(), lastUsedAt: null };
   await db.saveRoutine(r);
   state.routines = sortRoutines(state.routines.concat([r]));
-  toast(`Saved routine ${r.name}`, 'Edit', () => { location.hash = `#/routine/${r.id}`; });
+  toast(t('routine.savedToast', { name: r.name }), t('action.edit'),
+    () => { location.hash = `#/routine/${r.id}`; });
 }
 
 /* ==========================================================================
@@ -1928,7 +1993,7 @@ async function doExport() {
   download(`flexloop-${S.localDate()}.json`, JSON.stringify(data, null, 2), 'application/json');
   state.settings.lastExportAt = Date.now();
   db.saveSettings(state.settings);
-  toast(`Exported ${data.sessions.length} sessions`);
+  toast(t('io.exportedSessions', { n: data.sessions.length }));
   render();
 }
 
@@ -1947,16 +2012,16 @@ async function doExportCsv() {
   });
   download(`flexloop-${S.localDate()}.csv`, csv, 'text/csv');
   const rows = csv.split('\n').length - 2; // less the header and trailing newline
-  toast(`Exported ${rows} sets`);
+  toast(t('io.exportedSets', { n: rows }));
 }
 
 function readFile(input) {
   return new Promise((resolve, reject) => {
     const f = input.files && input.files[0];
-    if (!f) return reject(new Error('No file chosen.'));
+    if (!f) return reject(new Error(t('io.noFile')));
     const r = new FileReader();
     r.onload = () => resolve({ text: String(r.result), name: f.name });
-    r.onerror = () => reject(new Error('That file could not be read.'));
+    r.onerror = () => reject(new Error(t('io.unreadable')));
     r.readAsText(f);
   });
 }
@@ -1968,20 +2033,26 @@ async function doImportJson(input) {
     db.validateBackup(data);
     const nRoutines = Array.isArray(data.routines) ? data.routines.length : 0;
     const mode = await chooseImportModeSheet({
-      title: 'Merge or replace?',
-      body: `This backup holds ${data.sessions.length} sessions, ${data.exercises.length} exercises${
-        nRoutines ? ` and ${nRoutines} routine${nRoutines === 1 ? '' : 's'}` : ''
-      }. Merge adds them to what is here and leaves your settings alone. Replace wipes this device first, settings included. Either way the file wins where the two hold the same session.`,
+      title: t('io.mergeOrReplace'),
+      body: t('io.mergeOrReplaceBody', {
+        sessions: plural('count.sessions', data.sessions.length),
+        exercises: plural('count.exercises', data.exercises.length),
+        routines: nRoutines
+          ? t('io.andRoutines', { routines: plural('count.routines', nRoutines) }) : '',
+      }),
     });
     if (!mode) return;
     const res = await db.importAll(data, mode);
     // Harmless re-read after a merge, which never writes settings.
     state.settings = db.loadSettings();
+    // A replace brings the file's own language with it.
+    setLang(state.settings.lang);
+    applyLang();
     await reload();
     render();
-    toast(`${mode === 'merge' ? 'Merged' : 'Restored'} ${res.sessions} sessions`);
+    toast(t(mode === 'merge' ? 'io.merged' : 'io.restored', { n: res.sessions }));
   } catch (err) {
-    toast(err.message || 'Import failed.', null, null, 5000);
+    toast(err.message || t('io.importFailed'), null, null, 5000);
   } finally {
     input.value = '';
   }
@@ -1992,26 +2063,30 @@ async function doImportCsv(input) {
     const { text } = await readFile(input);
     if (!looksLikeStrongify(text)) {
       const cont = await confirmSheet({
-        title: 'Unfamiliar CSV',
-        body: 'No Exercise Name or Routine Name header in this file. flexloop will read it in the usual column order anyway.',
-        confirm: 'Try anyway',
+        title: t('io.unfamiliarCsv'),
+        body: t('io.unfamiliarCsvBody'),
+        confirm: t('io.tryAnyway'),
       });
       if (!cont) return;
     }
     const data = parseStrongifyCsv(text);
     const r = data._report;
     const ok = await confirmSheet({
-      title: 'Import this history?',
-      body: `Found ${r.sessions} sessions across ${r.exercises} exercises${r.skipped ? `, skipping ${r.skipped} unreadable rows` : ''}. These are merged in; nothing already on this device is deleted.`,
-      confirm: 'Import',
+      title: t('io.importHistory'),
+      body: t('io.importHistoryBody', {
+        sessions: plural('count.sessions', r.sessions),
+        exercises: plural('count.exercises', r.exercises),
+        skipped: r.skipped ? t('io.skippedRows', { n: r.skipped }) : '',
+      }),
+      confirm: t('action.import'),
     });
     if (!ok) return;
     const res = await db.importAll(data, 'merge');
     await reload();
     render();
-    toast(`Imported ${res.sessions} sessions`);
+    toast(t('io.imported', { n: res.sessions }));
   } catch (err) {
-    toast(err.message || 'Import failed.', null, null, 5000);
+    toast(err.message || t('io.importFailed'), null, null, 5000);
   } finally {
     input.value = '';
   }
@@ -2025,15 +2100,19 @@ const hasDemoData = () => state.sessions.some((s) => s.source === 'demo');
 async function loadDemoData() {
   const data = buildDemoData({ unit: state.settings.unit });
   const ok = await confirmSheet({
-    title: 'Load sample data?',
-    body: `${data.sessions.length} example sessions across six months, with ${data.exercises.length} exercises and ${data.routines.length} routines. Your settings are untouched, and Settings can remove all of it again.`,
-    confirm: 'Load it',
+    title: t('demo.loadTitle'),
+    body: t('demo.loadBody', {
+      sessions: data.sessions.length,
+      exercises: plural('count.exercises', data.exercises.length),
+      routines: plural('count.routines', data.routines.length),
+    }),
+    confirm: t('demo.loadConfirm'),
   });
   if (!ok) return;
   const res = await db.importAll(data, 'merge');
   await reload();
   render();
-  toast(`Loaded ${res.sessions} sample sessions`);
+  toast(t('demo.loaded', { n: res.sessions }));
 }
 
 /**
@@ -2045,9 +2124,9 @@ async function loadDemoData() {
 async function removeDemoData() {
   const doomed = state.sessions.filter((s) => s.source === 'demo');
   const ok = await confirmSheet({
-    title: 'Remove sample data?',
-    body: `Deletes the ${doomed.length} sample sessions and their routines. Anything you logged yourself stays, along with any sample exercise you have since used.`,
-    confirm: 'Remove', danger: true,
+    title: t('demo.removeTitle'),
+    body: t('demo.removeBody', { n: doomed.length }),
+    confirm: t('action.remove'), danger: true,
   });
   if (!ok) return;
 
@@ -2067,7 +2146,7 @@ async function removeDemoData() {
 
   await reload();
   render();
-  toast(`Removed ${doomed.length} sample sessions`);
+  toast(t('demo.removed', { n: doomed.length }));
 }
 
 /* ==========================================================================
@@ -2105,7 +2184,7 @@ function tickRest() {
   if (left <= 0 && !restDone) {
     restDone = true;
     if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
-    toast('Rest done');
+    toast(t('rest.done'));
   }
   if (left > 0) restDone = false;
 }
@@ -2235,15 +2314,15 @@ document.addEventListener('click', async (e) => {
       const s = c.session || activeSession();
       if (!s) return;
       const ok = await confirmSheet({
-        title: 'Discard this session?', body: 'Everything logged in it is deleted.',
-        confirm: 'Discard', danger: true,
+        title: t('session.discardTitle'), body: t('session.discardBody'),
+        confirm: t('session.discardConfirm'), danger: true,
       });
       if (!ok) return;
       await db.deleteSession(s.id);
       await reload();
       stopRest();
       render();
-      toast('Session discarded');
+      toast(t('session.discarded'));
       break;
     }
 
@@ -2254,20 +2333,20 @@ document.addEventListener('click', async (e) => {
     case 'delete-session': {
       const s = c.session;
       const ok = await confirmSheet({
-        title: 'Delete this session?', body: 'It is removed from your history and from every chart.',
-        confirm: 'Delete', danger: true,
+        title: t('session.deleteTitle'), body: t('session.deleteBody'),
+        confirm: t('action.delete'), danger: true,
       });
       if (!ok) return;
       await db.deleteSession(s.id);
       await reload();
       location.hash = '#/history';
-      toast('Session deleted');
+      toast(t('session.deleted'));
       break;
     }
 
     case 'jump-exercise': {
       const id = btn.dataset.id;
-      if (!state.byId.has(id)) { toast('That exercise is no longer in your list'); return; }
+      if (!state.byId.has(id)) { toast(t('exercises.gone')); return; }
       state.progressEx = id;
       state.progressTab = 'exercise';
       localStorage.setItem('flexloop.progressEx', id);
@@ -2313,10 +2392,10 @@ document.addEventListener('click', async (e) => {
 
     case 'new-routine': {
       const name = await promptSheet({
-        title: 'New routine',
-        label: 'Routine name',
-        placeholder: 'Push A, Legs, Upper…',
-        confirm: 'Create',
+        title: t('routine.newTitle'),
+        label: t('routine.name'),
+        placeholder: t('routine.namePlaceholder'),
+        confirm: t('action.create'),
       });
       if (!name) return;
       const r = { id: uid('r'), name, items: [], createdAt: Date.now(), updatedAt: Date.now(), lastUsedAt: null };
@@ -2330,7 +2409,7 @@ document.addEventListener('click', async (e) => {
       const r = routineById(btn.dataset.id);
       if (!r) return;
       const name = await promptSheet({
-        title: 'Rename routine', label: 'Routine name', value: r.name,
+        title: t('routine.renameTitle'), label: t('routine.name'), value: r.name,
       });
       if (!name) return;
       r.name = name;
@@ -2343,15 +2422,15 @@ document.addEventListener('click', async (e) => {
       const r = routineById(btn.dataset.id);
       if (!r) return;
       const ok = await confirmSheet({
-        title: `Delete ${r.name}?`,
-        body: 'The routine is removed. Sessions you already logged from it are untouched.',
-        confirm: 'Delete', danger: true,
+        title: t('routine.deleteTitle', { name: r.name }),
+        body: t('routine.deleteBody'),
+        confirm: t('action.delete'), danger: true,
       });
       if (!ok) return;
       await db.deleteRoutine(r.id);
       state.routines = state.routines.filter((x) => x.id !== r.id);
       location.hash = '#/routines';
-      toast('Routine deleted');
+      toast(t('routine.deleted'));
       break;
     }
 
@@ -2375,7 +2454,7 @@ document.addEventListener('click', async (e) => {
       it.sets = Math.max(1, Math.min(12, setCountOf(it) + Number(btn.dataset.d)));
       // Patch the one number in place; a full render would drop the scroll position.
       const out = $('.rt-n', btn.closest('[data-i]'));
-      if (out) out.innerHTML = `${it.sets}<em>sets</em>`;
+      if (out) out.innerHTML = `${it.sets}<em>${esc(t('routine.setsShort'))}</em>`;
       await saveRoutine(r);
       break;
     }
@@ -2397,9 +2476,9 @@ document.addEventListener('click', async (e) => {
 
     case 'erase': {
       const ok = await confirmSheet({
-        title: 'Erase everything?',
-        body: 'Every session, exercise, routine and setting on this device is deleted. Export first if you might want any of it back.',
-        confirm: 'Erase everything', danger: true,
+        title: t('erase.title'),
+        body: t('erase.body'),
+        confirm: t('erase.confirm'), danger: true,
       });
       if (!ok) return;
       await db.clear(db.STORE_SE);
@@ -2407,7 +2486,7 @@ document.addEventListener('click', async (e) => {
       await db.clear(db.STORE_RO);
       await reload();
       render();
-      toast('All data erased');
+      toast(t('erase.done'));
       break;
     }
 
@@ -2426,25 +2505,31 @@ document.addEventListener('click', async (e) => {
       if (currentTab() === 'settings') render();
       break;
 
+    // The twin of the theme toggle, and rather blunter about it: every view is
+    // a string built from i18n.js, so the whole screen has to be rebuilt.
+    case 'lang':
+      switchLang(getLang() === 'en' ? 'de' : 'en');
+      break;
+
     case 'reload-app':
       location.reload();
       break;
 
     case 'check-update': {
-      if (!('serviceWorker' in navigator)) { toast('Service worker not supported'); break; }
+      if (!('serviceWorker' in navigator)) { toast(t('sw.unsupported')); break; }
       const reg = await navigator.serviceWorker.getRegistration();
-      if (!reg) { toast('Service worker not registered'); break; }
+      if (!reg) { toast(t('sw.unregistered')); break; }
       try {
         await reg.update();
       } catch (err) {
-        toast('Could not check for updates');
+        toast(t('sw.checkFailed'));
         break;
       }
       // If a new worker isn't installing/waiting, the byte-for-byte check
       // found nothing new. Otherwise the updatefound/controllerchange
       // listeners in registerSW() take it from here and surface their own
       // "Update ready" toast once the new worker has taken control.
-      if (!reg.installing && !reg.waiting) toast(`Already on the latest version (${VERSION_SHORT})`);
+      if (!reg.installing && !reg.waiting) toast(t('sw.upToDate', { version: VERSION_SHORT }));
       break;
     }
 
@@ -2454,19 +2539,19 @@ document.addEventListener('click', async (e) => {
     // active worker misses on every request afterwards and refills from the
     // network, which is also why this needs a connection to be worth doing.
     case 'clear-cache': {
-      if (!('caches' in window)) { toast('Cache storage not supported'); break; }
-      if (navigator.onLine === false) { toast('Go online first — the app refetches itself'); break; }
+      if (!('caches' in window)) { toast(t('cache.unsupported')); break; }
+      if (navigator.onLine === false) { toast(t('cache.offline')); break; }
       const ok = await confirmSheet({
-        title: 'Clear the offline cache?',
-        body: 'Every stored copy of the app is deleted and fetched again on the next load. Your sessions, exercises, routines and settings are not touched. Needs a connection.',
-        confirm: 'Clear and reload', danger: true,
+        title: t('cache.clearTitle'),
+        body: t('cache.clearBody'),
+        confirm: t('cache.clearConfirm'), danger: true,
       });
       if (!ok) return;
       try {
         const keys = await caches.keys();
         await Promise.all(keys.map((k) => caches.delete(k)));
       } catch (err) {
-        toast('Could not clear the cache');
+        toast(t('cache.clearFailed'));
         break;
       }
       location.reload();
@@ -2536,6 +2621,9 @@ $('#view').addEventListener('change', async (e) => {
       editOptionsSheet(key);
       return;
     }
+    // The language is not a stored value like the others: switchLang writes
+    // the setting, redresses the shell and re-renders in one go.
+    if (key === 'lang') { switchLang(el.value); toast(t('settings.prefSaved')); return; }
     let v = el.value;
     if (key === 'restTimerAuto') v = v === 'yes';
     else if (OPTION_LISTS[key]) {
@@ -2544,11 +2632,11 @@ $('#view').addEventListener('change', async (e) => {
     } else if (key === 'repStep') v = Math.max(1, parseInt(v, 10) || 1);
     else if (key === 'volumeTrend') v = S.maMode(v).id;
     else if (key === 'boostMetric') v = S.boostMetric(v).id;
-    else if (key === 'theme') v = THEMES.some((t) => t.id === v) ? v : 'dark';
+    else if (key === 'theme') v = THEMES.some((th) => th.id === v) ? v : 'dark';
     state.settings[key] = v;
     db.saveSettings(state.settings);
     if (key === 'theme') applyTheme();
-    toast('Preference saved');
+    toast(t('settings.prefSaved'));
     // Some of these change what the rest of the screen says: the unit relabels
     // the weight steps, turning the trend off hides its length select, the
     // theme decides which glyph the note beside it names, and each target
@@ -2590,93 +2678,25 @@ $('#view').addEventListener('pointermove', (e) => {
  * at, since a single sheet covering the whole app would be four screens of
  * text to find one paragraph in.
  *
+ * The text itself lives in i18n.js — a title, a standfirst and a list of
+ * term/explanation pairs per tab. Two of the settings paragraphs quote a
+ * number the app holds rather than a word, and are filled in here.
+ *
  * Every string is escaped on the way out, so these are plain text only.
  */
-const INFO = {
-  log: {
-    title: 'the Log',
-    sub: 'The +/− steppers and the checkmark cover adding and finishing a set. Everything else lives behind a long-press.',
-    items: [
-      ['Long-press a set row',
-       "Opens a menu to mark it a warmup, duplicate it, or delete it. There's no swipe or edit button — deleting a set is always this."],
-      ['Tap the weight or reps number',
-       'Type a value directly instead of stepping to it. One tap of − or + moves it by the weight step and rep step set in Settings.'],
-      ['Tap ••• on an exercise card',
-       'Mark every set in it done at once, move it up or down, or remove it from this session — the exercise itself is untouched.'],
-      ["Tap an exercise's name",
-       'Jumps to its chart on Progress → Per exercise.'],
-      ['The dim line under each name',
-       'The ghost: what you lifted last time, so you never have to go looking for it. New sets prefill from it too.'],
-      ['The line under the ghost',
-       'The target: what it would take to beat your own number today, in whichever metric you picked in Settings → Motivation. It aims at last session while you are under it, then at your all-time best. Tick the set that clears it and it says so.'],
-    ],
-  },
+function infoFor(tab) {
+  const id = INFO_TABS.includes(tab) ? tab : 'log';
+  return {
+    title: t(`info.${id}.title`),
+    sub: t(`info.${id}.sub`),
+    items: list(`info.${id}.items`).map(([term, body]) => [
+      term,
+      body.replace('{days}', EXPORT_NAG_DAYS).replace('{version}', APP_VERSION),
+    ]),
+  };
+}
 
-  history: {
-    title: 'History',
-    sub: 'Every finished session, newest first, grouped by month with that month’s session count and total volume.',
-    items: [
-      ['Tap any session',
-       'Opens it for editing. Sets, notes and exercises can be changed long after the fact, and every chart follows.'],
-      ['Deleting a session',
-       'Is done from inside it, at the bottom. It disappears from history, from your records, and from every chart.'],
-      ['Imported sessions',
-       'Carry an “imported” mark at the top. A CSV becomes one session per calendar day, with the routine name kept as the note. Sample sessions are marked too.'],
-      ['Volume, per month',
-       'Σ weight × reps over completed working sets. Warmups never count.'],
-    ],
-  },
-
-  progress: {
-    title: 'Progress',
-    sub: 'Overview is your whole training week by week. Per exercise is one lift at a time, over the window you pick.',
-    items: [
-      ['Estimated 1RM',
-       'Epley: weight × (1 + reps / 30), taking the best set of each session. An estimate, and optimistic above about 12 reps — which is why the formula is printed on the chart.'],
-      ['Volume',
-       'Σ weight × reps across completed sets. Warmups are excluded everywhere, including from personal records.'],
-      ['The trend line over Volume per session',
-       'A moving average — simple or exponential, over as many sessions as you choose in Settings → Plot settings. It reads NEEDS n+ until there are that many sessions.'],
-      ['↑ ↓ → in a volume reading',
-       'Where the trend line moved between the session before and this one: climbing, falling, or level.'],
-      ['Tap a point or a bar',
-       'Reads out its value. The charts of one exercise share a selection, so tapping a session marks it in all of them — the chart you touched reads out brightest, the others faintly.'],
-      ['1M / 3M / 6M / 1Y / All',
-       'Cuts the window. Averages and records are computed over the whole history first, so the window moves the view, not the numbers.'],
-      ['Going stale',
-       'Longest since you last trained it. Past three weeks it turns red.'],
-      ['Next target',
-       'What it would take to beat your all-time best in the metric picked in Settings → Motivation, how long that best has stood, and whether the last few sessions are climbing.'],
-    ],
-  },
-
-  settings: {
-    title: 'Settings',
-    sub: 'Preferences, the three editable dropdowns, what the Log aims at, how the trend line is computed, and your backups.',
-    items: [
-      ['Editable dropdowns',
-       'Rest timer, Weight step and Averaged over end in “Edit this list…”. That opens an editor where you add a value of your own — 75 seconds, a 3.75 kg plate pair, a 6-session average — or remove ones you never pick. Remove the value in use and the setting moves to the nearest one left; Reset to defaults puts the original list back.'],
-      ['Weight step and rep step',
-       'What one tap of − or + moves a set by while logging. The weight step follows the unit, so switching kg → lb relabels the list rather than converting it.'],
-      ['Moving averages',
-       'Simple averages the last n sessions equally. Exponential weights recent sessions more heavily, with k = 2/(n+1), and is seeded with the simple average of its first window — so both kinds start at the same session and the same number. Nothing is drawn until n sessions exist, and the average always runs over the full history before being cut to the window on screen.'],
-      ['Export, regularly',
-       `This app has no server. Everything lives in this browser’s storage, and iOS clears the storage of sites it considers unused — roughly a week of not opening one. The exported .json is the only real backup, so keep a recent one in your Files app or iCloud. flexloop nags after ${EXPORT_NAG_DAYS} days.`],
-      ['Import',
-       'Import backup asks whether to merge or replace: merge keeps what is already here and leaves your settings alone, replace wipes the device first. Import CSV always merges, deleting nothing. The ⓘ beside those buttons has the detail on both, and on what each file carries.'],
-      ['Sample data',
-       'With no history logged, the Log offers Load sample data: six months of an example split, so the charts and records have something to show. It never touches your settings, and Remove sample data here takes all of it back out, leaving anything you logged yourself — including any sample exercise you have since used.'],
-      ['Target to beat',
-       'Which metric the Log’s target line, the Next target tile and the finish-session read-out all measure. Estimated 1RM responds to weight and reps both; Heaviest set and Reps are blunter; Volume is the easiest to beat, since another set does it. None turns all three off. A lift that has never carried a load is always measured in reps.'],
-      ['Theme',
-       'Dark, light, or match system. The sun/moon beside the wordmark flips between dark and light from any screen.'],
-      ['Reload app, Check for update, Clear offline cache',
-       'Installed on the Home Screen there is no address bar, so Reload app is the way to reopen the page as it stands. Check for update asks the server whether a newer version exists — the browser only looks on its own schedule otherwise — and a new one installs in the background behind a Reload toast, so it never lands mid-set. Clear offline cache is the blunt one: it deletes every stored copy of the app so the next load fetches all of it again, which is what to reach for when a release was redeployed under a version number that did not change. It needs a connection, and none of the three touch your data.'],
-      ['The version at the foot',
-       `Tap it for the version history — what changed in each release. The offline cache is named after it (${APP_VERSION}), so it changes whenever the app itself does.`],
-    ],
-  },
-};
+const INFO_TABS = ['log', 'history', 'progress', 'settings'];
 
 /**
  * What changed, per released version, newest first. Reached by tapping the
@@ -2685,30 +2705,37 @@ const INFO = {
  */
 function versionSheet() {
   openSheet(`
-    <h2>Version history</h2>
-    <p class="sub">You are on ${esc(APP_VERSION)}. The version names the offline cache,
-      so it changes whenever the app itself does.</p>
+    <h2>${esc(t('version.title'))}</h2>
+    <p class="sub">${esc(t('version.sub', { version: APP_VERSION }))}</p>
     ${CHANGELOG.map((rel) => `
-      <h3 class="h-sec">${esc(rel.v)}${rel.v === APP_VERSION ? ' · current' : ''}</h3>
-      <div class="info-list">
-        ${rel.items.map(([t, d]) => `<div class="info-item">
-          <span class="t">${esc(t)}</span>
-          <span class="s">${esc(d)}</span></div>`).join('')}
-      </div>`).join('')}
-    <button class="btn btn-block" style="margin-top:16px" data-close>Close</button>`);
+      <h3 class="h-sec">${esc(rel.v)}${rel.v === APP_VERSION ? ` · ${esc(t('word.current'))}` : ''}</h3>
+      <div class="info-list">${infoItemsHtml(changelogItems(rel))}</div>`).join('')}
+    <button class="btn btn-block" style="margin-top:16px" data-close>${esc(t('action.close'))}</button>`);
+}
+
+/**
+ * A release's entries in the language on screen. Each item carries one pair
+ * per language; anything a translation has not reached falls back to the
+ * English it was written in.
+ */
+function changelogItems(rel) {
+  return (rel.items || []).map((it) => (Array.isArray(it) ? it : (it[getLang()] || it.en)));
+}
+
+/** The shared term/explanation list of every info sheet. */
+function infoItemsHtml(items) {
+  return items.map(([term, body]) => `<div class="info-item">
+    <span class="t">${esc(term)}</span>
+    <span class="s">${esc(body)}</span></div>`).join('');
 }
 
 function infoSheet() {
-  const info = INFO[currentTab()] || INFO.log;
+  const info = infoFor(currentTab());
   openSheet(`
-    <h2>About ${esc(info.title)}</h2>
+    <h2>${esc(t('nav.about', { title: info.title }))}</h2>
     <p class="sub">${esc(info.sub)}</p>
-    <div class="info-list">
-      ${info.items.map(([t, d]) => `<div class="info-item">
-        <span class="t">${esc(t)}</span>
-        <span class="s">${esc(d)}</span></div>`).join('')}
-    </div>
-    <button class="btn btn-block" style="margin-top:16px" data-close>Got it</button>`);
+    <div class="info-list">${infoItemsHtml(info.items)}</div>
+    <button class="btn btn-block" style="margin-top:16px" data-close>${esc(t('action.gotIt'))}</button>`);
 }
 
 /**
@@ -2718,43 +2745,25 @@ function infoSheet() {
  * exporting, this one says what each file actually holds.
  */
 function dataFormatSheet() {
-  const items = [
-    ['Export backup — .json',
-     'Everything, exactly as stored: sessions, exercises, routines and your settings. This is the lossless one and the only real backup — which is why only this button counts towards the export reminder, and a CSV never does.'],
-    ['Import backup — merge or replace',
-     'Merge adds the file’s sessions, exercises and routines to what is already here and leaves your settings alone. Replace wipes this device first, settings included. Both match on id, so where the two hold the same session the file wins outright — it is not a line-by-line merge of the two versions.'],
-    ['Reading a backup elsewhere',
-     'It is plain JSON, so any text editor opens it. schemaVersion says which shape it is in; flexloop refuses a file written by a newer version of the app rather than guess at it.'],
-    ['CSV — one row per set',
-     'Plain text, opens in any spreadsheet. Columns: App Version, Routine Name, Exercise Name, Exercise Type, Weight, Rep, Duration, Date. The date carries a time, which is what keeps sets in order.'],
-    ['Import CSV',
-     'Reads that shape and always merges — nothing already here is deleted. Sets sharing a calendar day become one session. (Import CSV from for example Strongify.)'],
-    ['Export CSV',
-     'Writes the same file, working sets only. Routines, settings, RPE, warmup flags and unfinished sets have no column and do not survive the trip. Use the .json to move between devices; use the CSV to take your history somewhere else.'],
-  ];
   openSheet(`
-    <h2>About export and import</h2>
-    <p class="sub">What each file carries, and what it leaves behind.</p>
-    <div class="info-list">
-      ${items.map(([t, d]) => `<div class="info-item">
-        <span class="t">${esc(t)}</span>
-        <span class="s">${esc(d)}</span></div>`).join('')}
-    </div>
-    <button class="btn btn-block" style="margin-top:16px" data-close>Got it</button>`);
+    <h2>${esc(t('dataInfo.title'))}</h2>
+    <p class="sub">${esc(t('dataInfo.sub'))}</p>
+    <div class="info-list">${infoItemsHtml(list('dataInfo.items'))}</div>
+    <button class="btn btn-block" style="margin-top:16px" data-close>${esc(t('action.gotIt'))}</button>`);
 }
 
 function setMenu(c) {
   if (!c.set) return;
   openSheet(`
-    <h2>Set ${c.si + 1}</h2>
+    <h2>${esc(t('setMenu.title', { n: c.si + 1 }))}</h2>
     <p class="sub">${esc(exName(c.entry.exerciseId))} · ${S.fmtNum(c.set.weight)} ${esc(unit())} × ${c.set.reps}</p>
     <div class="rows" style="margin-top:14px">
-      <button class="row" data-x="warmup"><span class="grow"><span class="t">${c.set.isWarmup ? 'Make it a working set' : 'Mark as warmup'}</span>
-        <span class="s">Warmups are excluded from volume and records</span></span></button>
-      <button class="row" data-x="dup"><span class="grow"><span class="t">Duplicate set</span>
-        <span class="s">Same weight and reps, added below</span></span></button>
-      <button class="row" data-x="del"><span class="grow"><span class="t" style="color:var(--danger)">Delete set</span>
-        <span class="s">Cannot be undone</span></span></button>
+      <button class="row" data-x="warmup"><span class="grow"><span class="t">${esc(t(c.set.isWarmup ? 'setMenu.makeWorking' : 'setMenu.markWarmup'))}</span>
+        <span class="s">${esc(t('setMenu.warmupSub'))}</span></span></button>
+      <button class="row" data-x="dup"><span class="grow"><span class="t">${esc(t('setMenu.duplicate'))}</span>
+        <span class="s">${esc(t('setMenu.duplicateSub'))}</span></span></button>
+      <button class="row" data-x="del"><span class="grow"><span class="t" style="color:var(--danger)">${esc(t('setMenu.delete'))}</span>
+        <span class="s">${esc(t('setMenu.deleteSub'))}</span></span></button>
     </div>`, (root) => {
     root.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-x]');
@@ -2775,14 +2784,15 @@ function setMenu(c) {
 function entryMenu(c) {
   openSheet(`
     <h2>${esc(exName(c.entry.exerciseId))}</h2>
-    <p class="sub">${c.entry.sets.length} set${c.entry.sets.length === 1 ? '' : 's'} in this session</p>
+    <p class="sub">${esc(t('entryMenu.sub', {
+      sets: plural('count.sets', c.entry.sets.length) }))}</p>
     <div class="rows" style="margin-top:14px">
-      <button class="row" data-x="all"><span class="grow"><span class="t">Mark every set done</span>
-        <span class="s">Tick the whole exercise at once</span></span></button>
-      <button class="row" data-x="up"><span class="grow"><span class="t">Move up</span></span></button>
-      <button class="row" data-x="down"><span class="grow"><span class="t">Move down</span></span></button>
-      <button class="row" data-x="rm"><span class="grow"><span class="t" style="color:var(--danger)">Remove from session</span>
-        <span class="s">Deletes its sets here only</span></span></button>
+      <button class="row" data-x="all"><span class="grow"><span class="t">${esc(t('entryMenu.allDone'))}</span>
+        <span class="s">${esc(t('entryMenu.allDoneSub'))}</span></span></button>
+      <button class="row" data-x="up"><span class="grow"><span class="t">${esc(t('routine.moveUp'))}</span></span></button>
+      <button class="row" data-x="down"><span class="grow"><span class="t">${esc(t('routine.moveDown'))}</span></span></button>
+      <button class="row" data-x="rm"><span class="grow"><span class="t" style="color:var(--danger)">${esc(t('entryMenu.remove'))}</span>
+        <span class="s">${esc(t('entryMenu.removeSub'))}</span></span></button>
     </div>`, (root) => {
     root.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-x]');
@@ -2804,9 +2814,9 @@ async function finishSession(session) {
   const empty = S.sessionSetCount(session) === 0;
   if (empty) {
     const ok = await confirmSheet({
-      title: 'Nothing marked done',
-      body: 'No completed sets in this session. Finish it anyway, or go back and tick your sets?',
-      confirm: 'Finish anyway',
+      title: t('session.nothingDone'),
+      body: t('session.nothingDoneBody'),
+      confirm: t('session.finishAnyway'),
     });
     if (!ok) return;
   }
@@ -2820,18 +2830,20 @@ async function finishSession(session) {
   location.hash = '#/log';
   render();
   if (verdicts.length) debriefSheet(session, verdicts);
-  else toast(`Session saved — ${summaryLine(session)}`);
+  else toast(t('session.savedToast', { summary: summaryLine(session) }));
 }
 
 /* ------------------------------------------------------ session debrief */
 
 const VERDICTS = {
-  pr: { rank: 0, label: 'best ever', cls: 'v-pr' },
-  up: { rank: 1, label: 'up on last time', cls: 'v-up' },
-  level: { rank: 2, label: 'level with last time', cls: 'v-level' },
-  down: { rank: 3, label: 'down on last time', cls: 'v-down' },
-  first: { rank: 4, label: 'first time logged', cls: 'v-first' },
+  pr: { rank: 0, cls: 'v-pr' },
+  up: { rank: 1, cls: 'v-up' },
+  level: { rank: 2, cls: 'v-level' },
+  down: { rank: 3, cls: 'v-down' },
+  first: { rank: 4, cls: 'v-first' },
 };
+
+const verdictLabel = (id) => t(`verdict.${id}`);
 
 /**
  * How each exercise in a finished session compares with its own past, best
@@ -2873,19 +2885,19 @@ function debriefSheet(session, verdicts) {
       : v.verdict === 'down' ? ` −${boostValue({ metric: v.metric }, Math.abs(v.delta))}` : '';
     return `<div class="verdict ${info.cls}">
       <span class="grow"><span class="t">${esc(v.name)}</span>
-        <span class="s">${esc(info.label)}${esc(delta)}</span></span>
+        <span class="s">${esc(verdictLabel(v.verdict))}${esc(delta)}</span></span>
       <span class="r">${esc(shown)}</span>
     </div>`;
   }).join('');
 
   const prs = verdicts.filter((v) => v.verdict === 'pr').length;
   openSheet(`
-    <h2>Session saved</h2>
+    <h2>${esc(t('session.saved'))}</h2>
     <p class="sub">${esc(summaryLine(session))}${prs
-      ? ` · ${prs} best ever` : ''}</p>
+      ? ` · ${esc(t('session.bestEver', { n: prs }))}` : ''}</p>
     <div class="verdicts">${rows}</div>
     <div class="btn-row" style="margin-top:18px">
-      <button class="btn btn-primary" data-close>Done</button>
+      <button class="btn btn-primary" data-close>${esc(t('action.done'))}</button>
     </div>`);
 }
 
@@ -2896,8 +2908,8 @@ function hintHtml() {
   const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   if (standalone || !iOS || localStorage.getItem('flexloop.a2hs')) return '';
   return `<div class="hint">
-    <div><b>Put flexloop on your Home Screen.</b> Tap Share, then “Add to Home Screen”. It then opens full screen and works with no signal.</div>
-    <button data-act="dismiss-hint" aria-label="Dismiss">×</button></div>`;
+    <div><b>${esc(t('hint.a2hsTitle'))}</b> ${esc(t('hint.a2hsBody'))}</div>
+    <button data-act="dismiss-hint" aria-label="${esc(t('action.dismiss'))}">×</button></div>`;
 }
 
 /* ==========================================================================
@@ -2914,14 +2926,14 @@ async function registerSW() {
       if (refreshing) return;
       refreshing = true;
       // Never reload on our own — the user might be mid-set.
-      toast('Update ready', 'Reload', () => location.reload(), 0);
+      toast(t('sw.updateReady'), t('action.reload'), () => location.reload(), 0);
     });
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
       if (!w) return;
       w.addEventListener('statechange', () => {
         if (w.state === 'installed' && navigator.serviceWorker.controller) {
-          toast('Update ready', 'Reload', () => location.reload(), 0);
+          toast(t('sw.updateReady'), t('action.reload'), () => location.reload(), 0);
         }
       });
     });
@@ -2935,14 +2947,17 @@ async function registerSW() {
    ========================================================================== */
 
 async function boot() {
-  // index.html already set the palette from localStorage before first paint;
-  // this re-runs it against the parsed settings and dresses the toggle button.
-  applyTheme();
+  // index.html already set the palette and <html lang> from localStorage
+  // before first paint; this re-runs both against the parsed settings, dresses
+  // the two toggle buttons, and fills in the static labels of the shell —
+  // which are deliberately empty in the markup until the language is known.
+  setLang(state.settings.lang);
+  applyLang();
   try {
     await db.openDB();
   } catch (err) {
-    $('#view').innerHTML = `<div class="empty"><div class="glyph"></div><h3>Storage unavailable</h3>
-      <p>This browser blocked local storage, so flexloop cannot save anything. Private browsing is the usual cause.</p></div>`;
+    $('#view').innerHTML = `<div class="empty"><div class="glyph"></div><h3>${esc(t('boot.storageTitle'))}</h3>
+      <p>${esc(t('boot.storageBody'))}</p></div>`;
     console.error(err);
     return;
   }

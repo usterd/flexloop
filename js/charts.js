@@ -6,6 +6,8 @@
    re-render on resize and on orientation change.
    ========================================================================= */
 
+import { t } from './i18n.js';
+
 const NS = 'http://www.w3.org/2000/svg';
 let uid = 0;
 
@@ -280,7 +282,7 @@ function bindSelection(wrap, cfg) {
 export function lineChart(wrap, points, opts = {}) {
   const draw = () => {
     if (!points || points.length === 0) {
-      return emptyState(wrap, opts.empty || 'No sessions in this window yet. Log one and the line starts here.');
+      return emptyState(wrap, opts.empty || t('chart.emptyLine'));
     }
     const W = Math.max(240, wrap.clientWidth || 320);
     const H = opts.height || 190;
@@ -297,7 +299,7 @@ export function lineChart(wrap, points, opts = {}) {
     const svg = svgEl('svg', {
       class: 'chart', width: W, height: H,
       viewBox: `0 0 ${W} ${H}`, role: 'img',
-      'aria-label': opts.aria || 'Line chart',
+      'aria-label': opts.aria || t('chart.line'),
     });
 
     const gid = `loopfade${++uid}`;
@@ -378,7 +380,7 @@ export function lineChart(wrap, points, opts = {}) {
  */
 export function barChart(wrap, bars, opts = {}) {
   const draw = () => {
-    if (!bars || bars.length === 0) return emptyState(wrap, opts.empty || 'Nothing to chart yet.');
+    if (!bars || bars.length === 0) return emptyState(wrap, opts.empty || t('chart.empty'));
     const W = Math.max(240, wrap.clientWidth || 320);
     const H = opts.height || 150;
     const pad = { t: 10, r: PAD_R, b: 20, l: PAD_L };
@@ -429,7 +431,7 @@ export function barChart(wrap, bars, opts = {}) {
     wrap.innerHTML = '';
     const svg = svgEl('svg', {
       class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`,
-      role: 'img', 'aria-label': opts.aria || 'Bar chart',
+      role: 'img', 'aria-label': opts.aria || t('chart.bar'),
     });
 
     ticks.forEach((t) => {
@@ -533,7 +535,7 @@ export function barChart(wrap, bars, opts = {}) {
 export function setChart(wrap, groups, opts = {}) {
   const draw = () => {
     const live = (groups || []).filter((g) => g.sets && g.sets.length);
-    if (!live.length) return emptyState(wrap, opts.empty || 'Nothing to chart yet.');
+    if (!live.length) return emptyState(wrap, opts.empty || t('chart.empty'));
 
     const W = Math.max(240, wrap.clientWidth || 320);
     const H = opts.height || 190;
@@ -594,7 +596,7 @@ export function setChart(wrap, groups, opts = {}) {
     wrap.innerHTML = '';
     const svg = svgEl('svg', {
       class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`,
-      role: 'img', 'aria-label': opts.aria || 'Weight and reps per set',
+      role: 'img', 'aria-label': opts.aria || t('chart.sets'),
     });
 
     R.ticks.forEach((t, i) => {

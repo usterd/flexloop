@@ -18,6 +18,7 @@
 
 import { SCHEMA_VERSION } from './db.js';
 import { localDate } from './stats.js';
+import { t } from './i18n.js';
 
 /** Split one CSV line into fields, honouring double quotes. */
 function splitFields(line) {
@@ -77,7 +78,7 @@ export function looksLikeStrongify(text) {
  */
 export function parseStrongifyCsv(text) {
   const rows = records(text, 8);
-  if (!rows.length) throw new Error('That CSV had no rows in it.');
+  if (!rows.length) throw new Error(t('io.csvNoRows'));
 
   const head = rows[0].map((h) => h.trim().toLowerCase());
   const hasHeader = head.includes('exercise name');
@@ -112,7 +113,9 @@ export function parseStrongifyCsv(text) {
       exercises.set(id, {
         id,
         name: rawName,
-        muscleGroup: (f[cRoutine] || 'Imported').trim() || 'Imported',
+        // The routine column names the group. Only the fallback is ours to
+        // translate — a name out of the file is data and stays as written.
+        muscleGroup: (f[cRoutine] || '').trim() || t('io.importedGroup'),
         unit: 'kg',
         isBodyweight: true, // provisional; cleared below if any load appears
       });
@@ -226,7 +229,7 @@ export function toStrongifyCsv({ sessions = [], exercises = [], appVersion = 'fl
         rows.push([
           appVersion,
           (session.notes || '').trim() || (ex && ex.muscleGroup) || 'flexloop',
-          (ex && ex.name) || 'Unknown exercise',
+          (ex && ex.name) || t('io.unknownExercise'),
           ex && ex.isBodyweight ? 'Bodyweight' : 'Weight',
           set.weight || 0,
           set.reps || 0,

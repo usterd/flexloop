@@ -21,6 +21,7 @@
 
 import { SCHEMA_VERSION } from './db.js';
 import { localDate } from './stats.js';
+import { t } from './i18n.js';
 
 const WEEKS = 26;
 
@@ -46,41 +47,48 @@ const SLOTS = [
  * The split. `load` and `step` are kilograms; `steps` is how many increments
  * the lift earns across the whole six months, spent fastest at the start.
  * `repSteps` does the same job for a lift carrying no load.
+ *
+ * Names are keys rather than words: the dataset is written in whichever
+ * language is on screen when it is loaded, while every id stays the same
+ * ASCII string in both, so "Remove sample data" can still find its own
+ * records and a second load overwrites rather than duplicates.
  */
 const PLAN = [
   {
-    split: 'Push',
+    split: 'push',
     exercises: [
-      { key: 'bench_press',      name: 'Bench Press',           load: 60,   step: 2.5,  steps: 5, sets: 3, reps: 6 },
-      { key: 'overhead_press',   name: 'Overhead Press',        load: 35,   step: 2.5,  steps: 4, sets: 3, reps: 6 },
-      { key: 'incline_db_press', name: 'Incline Dumbbell Press', load: 22.5, step: 2.5, steps: 4, sets: 3, reps: 10 },
-      { key: 'cable_fly',        name: 'Cable Fly',             load: 15,   step: 2.5,  steps: 3, sets: 3, reps: 12 },
-      { key: 'triceps_pushdown', name: 'Triceps Pushdown',      load: 25,   step: 2.5,  steps: 4, sets: 3, reps: 12 },
+      { key: 'bench_press',      load: 60,   step: 2.5,  steps: 5, sets: 3, reps: 6 },
+      { key: 'overhead_press',   load: 35,   step: 2.5,  steps: 4, sets: 3, reps: 6 },
+      { key: 'incline_db_press', load: 22.5, step: 2.5,  steps: 4, sets: 3, reps: 10 },
+      { key: 'cable_fly',        load: 15,   step: 2.5,  steps: 3, sets: 3, reps: 12 },
+      { key: 'triceps_pushdown', load: 25,   step: 2.5,  steps: 4, sets: 3, reps: 12 },
     ],
   },
   {
-    split: 'Pull',
+    split: 'pull',
     exercises: [
-      { key: 'deadlift',    name: 'Deadlift',       load: 90,   step: 5,    steps: 4, sets: 3, reps: 5 },
-      { key: 'barbell_row', name: 'Barbell Row',    load: 55,   step: 2.5,  steps: 5, sets: 3, reps: 8 },
-      { key: 'pull_up',     name: 'Pull-Up',        load: 0,    step: 0,    steps: 0, sets: 3, reps: 6, repSteps: 5 },
-      { key: 'face_pull',   name: 'Face Pull',      load: 20,   step: 2.5,  steps: 3, sets: 3, reps: 15 },
-      { key: 'db_curl',     name: 'Dumbbell Curl',  load: 12.5, step: 1.25, steps: 4, sets: 3, reps: 10 },
+      { key: 'deadlift',    load: 90,   step: 5,    steps: 4, sets: 3, reps: 5 },
+      { key: 'barbell_row', load: 55,   step: 2.5,  steps: 5, sets: 3, reps: 8 },
+      { key: 'pull_up',     load: 0,    step: 0,    steps: 0, sets: 3, reps: 6, repSteps: 5 },
+      { key: 'face_pull',   load: 20,   step: 2.5,  steps: 3, sets: 3, reps: 15 },
+      { key: 'db_curl',     load: 12.5, step: 1.25, steps: 4, sets: 3, reps: 10 },
     ],
   },
   {
-    split: 'Legs',
+    split: 'legs',
     exercises: [
-      { key: 'back_squat',        name: 'Back Squat',          load: 75,  step: 5,   steps: 4, sets: 3, reps: 5 },
-      { key: 'romanian_deadlift', name: 'Romanian Deadlift',   load: 60,  step: 2.5, steps: 5, sets: 3, reps: 8 },
-      { key: 'leg_press',         name: 'Leg Press',           load: 120, step: 10,  steps: 3, sets: 3, reps: 10 },
-      { key: 'leg_curl',          name: 'Seated Leg Curl',     load: 35,  step: 5,   steps: 3, sets: 3, reps: 12 },
-      { key: 'calf_raise',        name: 'Standing Calf Raise', load: 50,  step: 5,   steps: 4, sets: 3, reps: 15 },
+      { key: 'back_squat',        load: 75,  step: 5,   steps: 4, sets: 3, reps: 5 },
+      { key: 'romanian_deadlift', load: 60,  step: 2.5, steps: 5, sets: 3, reps: 8 },
+      { key: 'leg_press',         load: 120, step: 10,  steps: 3, sets: 3, reps: 10 },
+      { key: 'leg_curl',          load: 35,  step: 5,   steps: 3, sets: 3, reps: 12 },
+      { key: 'calf_raise',        load: 50,  step: 5,   steps: 4, sets: 3, reps: 15 },
     ],
   },
 ];
 
 const exerciseId = (key) => `ex_demo_${key}`;
+const exerciseName = (key) => t(`demo.ex.${key}`);
+const splitName = (split) => t(`demo.split.${split}`);
 
 const roundTo = (v, q) => (q > 0 ? Math.round(v / q) * q : Math.round(v));
 
@@ -129,8 +137,8 @@ export function buildDemoData({ unit = 'kg', now = new Date() } = {}) {
 
   const exercises = PLAN.flatMap((p) => p.exercises.map((ex) => ({
     id: exerciseId(ex.key),
-    name: ex.name,
-    muscleGroup: p.split,
+    name: exerciseName(ex.key),
+    muscleGroup: splitName(p.split),
     unit,
     isBodyweight: !ex.load,
   })));
@@ -182,7 +190,7 @@ export function buildDemoData({ unit = 'kg', now = new Date() } = {}) {
       // Never null: a session without an end reads as still in progress and
       // the Log would open mid-workout.
       endedAt: startedAt + (10 + totalSets * 3.5) * 60000,
-      notes: plan.split,
+      notes: splitName(plan.split),
       entries,
       source: 'demo',
     });
@@ -191,8 +199,8 @@ export function buildDemoData({ unit = 'kg', now = new Date() } = {}) {
 
   const createdAt = sessions.length ? sessions[0].startedAt : Date.now();
   const routines = PLAN.map((p) => ({
-    id: `r_demo_${p.split.toLowerCase()}`,
-    name: p.split,
+    id: `r_demo_${p.split}`,
+    name: splitName(p.split),
     items: p.exercises.map((ex) => ({ exerciseId: exerciseId(ex.key), sets: ex.sets })),
     createdAt,
     updatedAt: createdAt,

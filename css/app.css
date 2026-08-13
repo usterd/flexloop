@@ -209,6 +209,16 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
   fill: none; stroke: currentColor;
   stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
 }
+/* The language toggle. Same button as the sun/moon beside it, with two
+   letters where the glyph would be — sized to sit on the same optical
+   line as an 18px icon rather than to fill the 30px target. */
+.icon-btn-text span {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  line-height: 1;
+}
 
 .topbar-action { display: flex; gap: 8px; align-items: center; }
 
