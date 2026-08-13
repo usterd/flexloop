@@ -1,7 +1,8 @@
 # flexloop
 
 An offline gym journal. Static files, no backend, no accounts, no network calls at
-runtime. Everything you log stays in your phone's own storage.
+runtime. Everything you log stays in your phone's own storage. The interface
+speaks English and German, switched from the topbar.
 
 Built to be added to an iPhone Home Screen and used in airplane mode.
 
@@ -57,7 +58,8 @@ correct it.
    self.APP_VERSION = 'flexloop-v12';   // was v11
 
    self.APP_CHANGELOG = [
-     { v: 'flexloop-v12', items: [['What moved', 'Thirty words at most.']] },
+     { v: 'flexloop-v12', items: [{ en: ['What moved', 'Thirty words at most.'],
+                                    de: ['Was sich bewegt hat', 'Höchstens dreißig Wörter.'] }] },
      // …then every earlier release, unchanged
    ];
    ```
@@ -253,7 +255,8 @@ The (i) beside the wordmark explains **the tab you are on** — the Log's
 long-press gestures, what History groups and how to delete a session, how
 Progress computes e1RM and volume, and on Settings the editable dropdowns, the
 two moving averages, and why exporting regularly is not optional. One entry per
-tab, in `INFO` at the bottom of `app.js`.
+tab, under `info.<tab>.items` in `js/i18n.js`, assembled by `infoFor()` in
+`app.js`.
 
 Settings also nags for a backup once **six days** have passed since your last
 export (`EXPORT_NAG_DAYS` in `app.js`). iOS can clear a site's storage after
@@ -284,6 +287,38 @@ carries whatever has to sit on top of an accent fill.
   area gradient, whose stops are styled from CSS because an SVG `stop-color`
   attribute cannot hold a custom property.
 
+## English and German
+
+The interface speaks both. Every sentence lives in `js/i18n.js` as one entry per
+key holding `[english, german]`, so a translation sits on the same line as the
+sentence it translates and the two cannot drift apart unnoticed. Three ways in:
+`t(key, vars)` for a string with `{placeholders}`, `plural(key, n)` for the
+`.one`/`.other` pair of a count, and `list(key)` for the info sheets and the ten
+greetings on the idle Log.
+
+- The **two-letter chip beside the sun/moon** switches language from any screen,
+  and prints the language it would switch you to — the same rule the theme toggle
+  follows. **Settings → Appearance** holds the same choice as a dropdown.
+- The stored value is `lang: 'en' | 'de'`. Views are strings rebuilt on every
+  render, so switching is a `render()`; only the static markup of `index.html`
+  is patched by hand, from the nodes carrying `data-i18n`.
+- Those nodes ship **empty** rather than in English, and the inline script sets
+  `<html lang>` before first paint. Nothing is ever briefly shown in the wrong
+  language.
+- Dates and numbers follow the language, not the handset: `en-GB` prints
+  "20 Jul" and a decimal point, `de-DE` prints "20. Juli" and a decimal comma.
+  Only the reading changes — storage, the CSV and every option value stay plain
+  JS numbers, and the two inputs that read a weight back accept either
+  separator.
+- What is **data** stays as written: your exercise names, routine names and
+  notes are never translated, and neither is anything an import brought in. The
+  sample dataset is generated in whichever language is on screen when it is
+  loaded, but its ids are the same ASCII strings either way, so *Remove sample
+  data* still finds all of it afterwards.
+- The changelog in `js/version.js` carries both languages per entry. Anything a
+  translation has not reached falls back to the English it was written in, which
+  is also what a missing key does.
+
 ## Files
 
 ```
@@ -292,6 +327,7 @@ manifest.webmanifest    relative start_url and scope, icons
 sw.js                   precache list, cache named after APP_VERSION
 css/app.css             the whole visual system
 js/version.js           the version string + changelog, shared by sw.js and app.js
+js/i18n.js              every string the UI shows, English and German
 js/app.js               routing, views, all interaction
 js/db.js                IndexedDB wrapper (exercises, sessions, routines),
                         export/import, settings

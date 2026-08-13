@@ -12,6 +12,8 @@
    IndexedDB is only the working copy.
    ========================================================================= */
 
+import { t } from './i18n.js';
+
 const DB_NAME = 'flexloop';
 const DB_VERSION = 2;
 export const SCHEMA_VERSION = 2;
@@ -128,6 +130,8 @@ export const DEFAULT_TREND_PERIODS = [3, 5, 8, 10, 12];
 const DEFAULT_SETTINGS = {
   unit: 'kg',              // display unit for every weight
   theme: 'dark',           // 'dark' | 'light' | 'auto' (follow the system)
+  lang: 'en',              // 'en' | 'de' — see i18n.js. index.html repeats
+                           // this default inline, before the first paint.
   restTimerSeconds: 120,
   restTimerOptions: DEFAULT_REST_OPTIONS,
   restTimerAuto: true,     // start the timer when a set is marked done
@@ -202,17 +206,17 @@ export async function exportAll() {
 
 /** Throws a human-readable Error if the file isn't something we can restore. */
 export function validateBackup(data) {
-  if (!data || typeof data !== 'object') throw new Error('That file is not a flexloop backup.');
-  if (typeof data.schemaVersion !== 'number') throw new Error('Missing schemaVersion — not a flexloop backup.');
+  if (!data || typeof data !== 'object') throw new Error(t('backup.notBackup'));
+  if (typeof data.schemaVersion !== 'number') throw new Error(t('backup.noSchema'));
   if (data.schemaVersion > SCHEMA_VERSION) {
-    throw new Error(`Backup is schema v${data.schemaVersion}; this build reads up to v${SCHEMA_VERSION}. Update the app first.`);
+    throw new Error(t('backup.tooNew', { found: data.schemaVersion, max: SCHEMA_VERSION }));
   }
   if (!Array.isArray(data.sessions) || !Array.isArray(data.exercises)) {
-    throw new Error('Backup is missing its sessions or exercises list.');
+    throw new Error(t('backup.missingLists'));
   }
   // Routines arrived in schema v2. A v1 file simply has none, which is fine.
   if (data.routines != null && !Array.isArray(data.routines)) {
-    throw new Error('Backup has a routines field that is not a list.');
+    throw new Error(t('backup.badRoutines'));
   }
   return true;
 }

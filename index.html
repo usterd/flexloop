@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- lang is rewritten by the inline script below, before the first paint. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -9,7 +10,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#08090B" id="theme-color">
 
-<meta name="description" content="Offline gym journal.">
+<!-- Rewritten in the chosen language by app.js. -->
+<meta name="description" content="Offline gym journal." id="app-description">
 
 <!-- iOS standalone mode. The first is legacy-but-still-required on iOS;
      the second is the standardised replacement. Ship both. -->
@@ -19,14 +21,19 @@
 <meta name="apple-mobile-web-app-title" content="flexloop">
 <meta name="format-detection" content="telephone=no">
 
-<!-- Theme before first paint. app.js is a module and therefore deferred, so
-     leaving this to it would flash the dark shell at a light-theme user on
-     every launch. Deliberately duplicated from db.js DEFAULT_SETTINGS: it has
-     to run without importing anything. -->
+<!-- Theme and language before first paint. app.js is a module and therefore
+     deferred, so leaving this to it would flash the dark shell at a
+     light-theme user on every launch. Deliberately duplicated from db.js
+     DEFAULT_SETTINGS: it has to run without importing anything.
+
+     The language only sets <html lang> here — every translated string in the
+     body is left empty in the markup and filled by app.js, so nothing is ever
+     briefly shown in the wrong language. -->
 <script>
 (function () {
   try {
     var s = JSON.parse(localStorage.getItem('flexloop.settings') || '{}');
+    document.documentElement.lang = s.lang === 'de' ? 'de' : 'en';
     var t = s.theme || 'dark';
     if (t === 'auto') {
       t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
@@ -66,11 +73,16 @@
       <a class="wordmark-link" href="https://usterd.github.io/flexloop/" target="_blank" rel="noopener noreferrer">
         <h1 class="wordmark">flex<span>loop</span></h1>
       </a>
-      <button type="button" class="icon-btn" id="info-btn" data-act="info" aria-label="About this screen">
+      <button type="button" class="icon-btn" id="info-btn" data-act="info" aria-label="">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.6" r="0.75" fill="currentColor" stroke="none"/></svg>
       </button>
-      <button type="button" class="icon-btn" id="theme-btn" data-act="theme" aria-label="Switch to light mode">
+      <button type="button" class="icon-btn" id="theme-btn" data-act="theme" aria-label="">
         <svg viewBox="0 0 24 24" aria-hidden="true"></svg>
+      </button>
+      <!-- Same button as the theme toggle, printing the language it would
+           switch you to rather than a glyph. Both are filled by app.js. -->
+      <button type="button" class="icon-btn icon-btn-text" id="lang-btn" data-act="lang" aria-label="">
+        <span aria-hidden="true"></span>
       </button>
     </div>
     <div id="topbar-action" class="topbar-action"></div>
@@ -82,29 +94,29 @@
 <div id="rest" class="rest" hidden>
   <div class="rest-bar"><i id="rest-fill"></i></div>
   <div class="rest-row">
-    <span class="rest-label">Rest</span>
+    <span class="rest-label" data-i18n="rest.label"></span>
     <span id="rest-clock" class="rest-clock">0:00</span>
-    <button id="rest-add" class="rest-btn" type="button">+30s</button>
-    <button id="rest-skip" class="rest-btn" type="button">Skip</button>
+    <button id="rest-add" class="rest-btn" type="button" data-i18n="rest.add30"></button>
+    <button id="rest-skip" class="rest-btn" type="button" data-i18n="rest.skip"></button>
   </div>
 </div>
 
 <nav class="tabs" id="tabs">
   <a href="#/log"      data-tab="log"      class="tab">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6M8 6v12M16 6v12M20 9v6M8 12h8"/></svg>
-    <span>Log</span>
+    <span data-i18n="tab.log"></span>
   </a>
   <a href="#/history"  data-tab="history"  class="tab">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-    <span>History</span>
+    <span data-i18n="tab.history"></span>
   </a>
   <a href="#/progress" data-tab="progress" class="tab">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-6 4 4 7-8"/></svg>
-    <span>Progress</span>
+    <span data-i18n="tab.progress"></span>
   </a>
   <a href="#/settings" data-tab="settings" class="tab">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 11l4 4 4-4M4 19h16"/></svg>
-    <span>Settings</span>
+    <span data-i18n="tab.settings"></span>
   </a>
 </nav>
 
