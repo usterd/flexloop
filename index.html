@@ -21,9 +21,10 @@
 <meta name="apple-mobile-web-app-title" content="flexloop">
 <meta name="format-detection" content="telephone=no">
 
-<!-- Theme and language before first paint. app.js is a module and therefore
-     deferred, so leaving this to it would flash the dark shell at a
-     light-theme user on every launch. Deliberately duplicated from db.js
+<!-- Theme, language and text size before first paint. app.js is a module and
+     therefore deferred, so leaving this to it would flash the dark shell at a
+     light-theme user on every launch — and reflow the whole app a frame later
+     at anything but the shipped text size. Deliberately duplicated from db.js
      DEFAULT_SETTINGS: it has to run without importing anything.
 
      The language only sets <html lang> here — every translated string in the
@@ -34,6 +35,9 @@
   try {
     var s = JSON.parse(localStorage.getItem('flexloop.settings') || '{}');
     document.documentElement.lang = s.lang === 'de' ? 'de' : 'en';
+    // Same clamp as db.cleanTextSize: whole px, 0 to 4.
+    var tp = Math.min(4, Math.max(0, Math.round(Number(s.textSize)) || 0));
+    if (tp) document.documentElement.style.setProperty('--text-plus', tp + 'px');
     var t = s.theme || 'dark';
     if (t === 'auto') {
       t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';

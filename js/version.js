@@ -22,10 +22,33 @@
    phone.
    ========================================================================= */
 
-self.APP_VERSION = 'flexloop-v26';
+self.APP_VERSION = 'flexloop-v27';
 
 /* Newest first. `v` is the cache name that shipped the entries under it. */
 self.APP_CHANGELOG = [
+  {
+    v: 'flexloop-v27',
+    items: [
+      {
+        en: ['Text size, in Settings → Appearance',
+          'Adds 0 to 4 px to everything smaller than the greeting on the Log. The small mono labels gain the most, since they had the least to give.'],
+        de: ['Schriftgröße, in Einstellungen → Darstellung',
+          'Legt 0 bis 4 px auf alles, was kleiner ist als der Gruß im Training. Die kleinen Mono-Beschriftungen gewinnen am meisten, weil sie am wenigsten hatten.'],
+      },
+      {
+        en: ['The charts read it too',
+          'Their tick labels grow with everything else, and the gutters they are drawn into grow with them — a longer date simply means the axis prints fewer of them.'],
+        de: ['Die Diagramme lesen sie mit',
+          'Ihre Achsenbeschriftungen wachsen mit, und die Ränder, in die sie gezeichnet werden, wachsen mit ihnen — ein längeres Datum heißt einfach, dass die Achse weniger davon druckt.'],
+      },
+      {
+        en: ['The set row keeps its digits',
+          'The − and + in a stepper hand back width as the type grows, so a weight like 142.5 still has as much room as it ever did.'],
+        de: ['Die Satzzeile behält ihre Ziffern',
+          'Das − und + im Schrittwähler geben Breite ab, wenn die Schrift wächst — ein Gewicht wie 142,5 hat also weiterhin so viel Platz wie zuvor.'],
+      },
+    ],
+  },
   {
     v: 'flexloop-v26',
     items: [

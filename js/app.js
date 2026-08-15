@@ -159,6 +159,29 @@ function switchLang(id) {
   render();
 }
 
+/* -------------------------------------------------------------- text size
+
+   The third of the appearance settings, and the one with the least machinery
+   behind it: a whole number of px, 0 to 4, added to every text size in the
+   app below the big heading. The stylesheet does all of the work through the
+   --text-plus custom property (see app.css) — this writes the number onto
+   <html> and nothing else has to know about it, in exactly the way nothing
+   downstream of data-theme knows which palette is live.
+
+   index.html applies the stored value before the first paint; this runs at
+   boot too, so the two agree, and again whenever the dropdown changes.       */
+
+const TEXT_SIZES = Array.from({ length: db.TEXT_SIZE_MAX + 1 }, (_, n) => ({
+  id: n,
+  get label() { return n === 0 ? t('textSize.none') : t('textSize.plus', { n }); },
+}));
+
+function applyTextSize() {
+  const n = db.cleanTextSize(state.settings.textSize);
+  state.settings.textSize = n;
+  document.documentElement.style.setProperty('--text-plus', `${n}px`);
+}
+
 /* ------------------------------------------------------------------ toast */
 
 let toastTimer = null;
@@ -1630,7 +1653,7 @@ async function viewSettings() {
           ${esc(t('settings.themeNote', {
             glyph: t(effectiveTheme() === 'dark' ? 'theme.sun' : 'theme.moon') }))}</p>
       </div>
-      <div class="field" style="margin-bottom:0">
+      <div class="field">
         <label for="p-lang">${esc(t('settings.language'))}</label>
         <select class="input" id="p-lang" data-pref="lang">
           ${LANGS.map((l) => `<option value="${l.id}"
@@ -1638,6 +1661,15 @@ async function viewSettings() {
         </select>
         <p class="meta" style="text-align:left;padding:6px 0 0">
           ${esc(t('settings.languageNote', { code: t('lang.otherShort') }))}</p>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="p-textsize">${esc(t('settings.textSize'))}</label>
+        <select class="input" id="p-textsize" data-pref="textSize">
+          ${TEXT_SIZES.map((ts) => `<option value="${ts.id}"
+            ${state.settings.textSize === ts.id ? 'selected' : ''}>${esc(ts.label)}</option>`).join('')}
+        </select>
+        <p class="meta" style="text-align:left;padding:6px 0 0">
+          ${esc(t('settings.textSizeNote'))}</p>
       </div>
     </div>
 
@@ -2633,14 +2665,19 @@ $('#view').addEventListener('change', async (e) => {
     else if (key === 'volumeTrend') v = S.maMode(v).id;
     else if (key === 'boostMetric') v = S.boostMetric(v).id;
     else if (key === 'theme') v = THEMES.some((th) => th.id === v) ? v : 'dark';
+    else if (key === 'textSize') v = db.cleanTextSize(v);
     state.settings[key] = v;
     db.saveSettings(state.settings);
     if (key === 'theme') applyTheme();
+    if (key === 'textSize') applyTextSize();
     toast(t('settings.prefSaved'));
     // Some of these change what the rest of the screen says: the unit relabels
     // the weight steps, turning the trend off hides its length select, the
     // theme decides which glyph the note beside it names, and each target
-    // metric explains itself differently.
+    // metric explains itself differently. The text size is not among them: it
+    // says nothing new, the stylesheet has already resized the screen under
+    // the dropdown, and the charts — the one thing that is measured rather
+    // than styled — are drawn fresh when Progress is next opened.
     if (key === 'unit' || key === 'theme' || key === 'volumeTrend'
       || key === 'volumeTrendPeriod' || key === 'boostMetric') render();
   }
@@ -2947,12 +2984,13 @@ async function registerSW() {
    ========================================================================== */
 
 async function boot() {
-  // index.html already set the palette and <html lang> from localStorage
-  // before first paint; this re-runs both against the parsed settings, dresses
-  // the two toggle buttons, and fills in the static labels of the shell —
-  // which are deliberately empty in the markup until the language is known.
+  // index.html already set the palette, <html lang> and the text size from
+  // localStorage before first paint; this re-runs all three against the parsed
+  // settings, dresses the two toggle buttons, and fills in the static labels
+  // of the shell — deliberately empty in the markup until the language is known.
   setLang(state.settings.lang);
   applyLang();
+  applyTextSize();
   try {
     await db.openDB();
   } catch (err) {

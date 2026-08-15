@@ -117,6 +117,14 @@ export const deleteRoutine = (id) => del(STORE_RO, id);
 const SETTINGS_KEY = 'flexloop.settings';
 
 /**
+ * The largest number of px Settings → Appearance → Text size will add. Four is
+ * where the smallest labels in the app (the 9px mono captions) have caught up
+ * with the body text and the type scale has nothing left to compress: past it
+ * the columns of the set grid start losing digits rather than gaining size.
+ */
+export const TEXT_SIZE_MAX = 4;
+
+/**
  * The values the Rest timer, Weight step and Averaged over dropdowns offer.
  * They are stored rather than hard-coded because the Settings tab lets you
  * edit all three lists — 3.75 kg plates, a 75 second rest and a 6-session
@@ -132,6 +140,9 @@ const DEFAULT_SETTINGS = {
   theme: 'dark',           // 'dark' | 'light' | 'auto' (follow the system)
   lang: 'en',              // 'en' | 'de' — see i18n.js. index.html repeats
                            // this default inline, before the first paint.
+  textSize: 0,             // px added to every text size below the big
+                           // heading, 0–4. Applied as the --text-plus custom
+                           // property; index.html repeats this one inline too.
   restTimerSeconds: 120,
   restTimerOptions: DEFAULT_REST_OPTIONS,
   restTimerAuto: true,     // start the timer when a set is marked done
@@ -149,6 +160,13 @@ const DEFAULT_SETTINGS = {
   boostMetric: 'e1rm',
 };
 
+/** Whole px, 0 to TEXT_SIZE_MAX. Anything else is 0 — the size it shipped at. */
+export function cleanTextSize(v) {
+  const n = Math.round(Number(v));
+  if (!isFinite(n) || n <= 0) return 0;
+  return Math.min(TEXT_SIZE_MAX, n);
+}
+
 /**
  * Fill in anything the stored object is missing.
  *
@@ -164,6 +182,9 @@ function withDefaults(stored) {
     ? s.weightStepOptions.slice() : DEFAULT_WEIGHT_STEPS.slice();
   s.volumeTrendPeriodOptions = Array.isArray(s.volumeTrendPeriodOptions)
     ? s.volumeTrendPeriodOptions.slice() : DEFAULT_TREND_PERIODS.slice();
+  // A hand-edited backup could carry anything here, and this one is written
+  // straight into the stylesheet: clamp it to the whole px the scale offers.
+  s.textSize = cleanTextSize(s.textSize);
   return s;
 }
 

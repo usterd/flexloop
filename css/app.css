@@ -10,6 +10,10 @@
                 row in dim mono, so the loop from last time to this time is
                 always visible without a tap.
 
+   TEXT SIZE    Every size in here is calc(<size> + var(--text-plus)), the 0–4px
+                the reader picked in Settings. See the token for what it does
+                not touch, and where the sizes below stop being enough.
+
    THEMES       Every colour in the app is one of the tokens below, so the
                 light theme is a second set of values for the same names and
                 nothing downstream knows which one is live. Roles, not hues:
@@ -44,6 +48,23 @@
 
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Settings → Appearance → Text size. The px this build adds to every text
+     size in the app, 0 to 4. The scale stops at .h-big, the 30px heading the
+     idle Log prints its greeting in ("Strong starts now."): that line is
+     already the largest thing on a screen, so it is the ceiling rather than a
+     participant, and everything under it closes some of the gap.
+
+     Every font-size below is therefore written as calc(<size> + var(...)) —
+     one absolute number per rule, not a multiplier, so the smallest labels
+     gain the most in proportion and the type scale compresses towards the
+     heading instead of scaling out of the layout.
+
+     Written on <html> by app.js, and by the inline script in index.html
+     before the first paint, exactly like the theme: a value applied after the
+     shell is up would reflow the whole app on every launch. charts.js reads
+     it back to widen the gutters its tick labels are drawn into. */
+  --text-plus: 0px;
 
   --r-sm: 8px;
   --r-md: 14px;
@@ -126,7 +147,7 @@ html, body {
 body {
   font-family: var(--sans);
   color: var(--chalk);
-  font-size: 16px;
+  font-size: calc(16px + var(--text-plus));
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
@@ -178,7 +199,7 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
 
 .wordmark {
   margin: 0;
-  font-size: 19px;
+  font-size: calc(19px + var(--text-plus));
   font-weight: 800;
   letter-spacing: -0.045em;
   color: var(--chalk);
@@ -214,7 +235,7 @@ button, .tab, .step, .chip, .set-done, .sheet-grab {
    line as an 18px icon rather than to fill the 30px target. */
 .icon-btn-text span {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px + var(--text-plus));
   font-weight: 600;
   letter-spacing: .04em;
   line-height: 1;
@@ -262,7 +283,7 @@ body.has-rest .view { padding-bottom: 96px; }
   gap: 2px;
   text-decoration: none;
   color: var(--dim);
-  font-size: 10px;
+  font-size: calc(10px + var(--text-plus));
   font-weight: 600;
   letter-spacing: 0.02em;
   position: relative;
@@ -289,7 +310,7 @@ body.has-rest .view { padding-bottom: 96px; }
 
 .eyebrow {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px + var(--text-plus));
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -297,6 +318,8 @@ body.has-rest .view { padding-bottom: 96px; }
   margin: 0 0 8px;
 }
 
+/* The one size in the file with no --text-plus on it, and the reason the token
+   is capped where it is: this is the ceiling the rest of the scale runs up to. */
 .h-big {
   margin: 2px 0 4px;
   font-size: 30px;
@@ -307,12 +330,12 @@ body.has-rest .view { padding-bottom: 96px; }
 
 .h-sec {
   margin: 26px 0 10px;
-  font-size: 15px;
+  font-size: calc(15px + var(--text-plus));
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
-.sub { color: var(--mist); font-size: 13.5px; margin: 0; }
+.sub { color: var(--mist); font-size: calc(13.5px + var(--text-plus)); margin: 0; }
 
 /* ----------------------------------------------------------------- cards */
 
@@ -336,7 +359,7 @@ body.has-rest .view { padding-bottom: 96px; }
 
 .card-title {
   margin: 0;
-  font-size: 16px;
+  font-size: calc(16px + var(--text-plus));
   font-weight: 700;
   letter-spacing: -0.015em;
   line-height: 1.25;
@@ -379,13 +402,18 @@ body.has-rest .view { padding-bottom: 96px; }
 /* The ghost: previous session, in dim mono, always on screen. */
 .ghost {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px + var(--text-plus));
   color: var(--dim);
   letter-spacing: -0.01em;
   margin-top: 3px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  /* Wrapping, like the target line under it: the three parts of this sentence
+     are flex items, and a row that cannot hold them all would otherwise shrink
+     them and break "95 kg × 5" mid-reading. It fits on one line at the shipped
+     text size; at the larger ones it goes over at a gap instead. */
+  flex-wrap: wrap;
+  gap: 0 6px;
 }
 .ghost::before {
   content: "";
@@ -399,7 +427,7 @@ body.has-rest .view { padding-bottom: 96px; }
    as one block: what you did, then what would beat it. */
 .boost {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px + var(--text-plus));
   color: var(--dim);
   letter-spacing: -0.01em;
   margin-top: 3px;
@@ -419,7 +447,7 @@ body.has-rest .view { padding-bottom: 96px; }
 .boost b { color: var(--mist); font-weight: 600; }
 .boost i {
   font-style: normal;
-  font-size: 11px;
+  font-size: calc(11px + var(--text-plus));
   color: var(--signal);
   opacity: 0.85;
   width: 100%;
@@ -442,7 +470,7 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .set-head span {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px + var(--text-plus));
   font-weight: 600;
   letter-spacing: 0.07em;
   color: var(--dim);
@@ -470,14 +498,14 @@ body.has-rest .view { padding-bottom: 96px; }
 .set.is-pr .num::after {
   content: "★";
   display: block;
-  font-size: 9px;
+  font-size: calc(9px + var(--text-plus));
   line-height: 1;
   color: var(--signal);
 }
 
 .num {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px + var(--text-plus));
   font-weight: 600;
   color: var(--dim);
   text-align: center;
@@ -486,7 +514,15 @@ body.has-rest .view { padding-bottom: 96px; }
 /* stepper: −  [value]  + */
 .stepper {
   display: grid;
-  grid-template-columns: 40px 1fr 40px;
+  /* The middle column is the one place in the app where the text growing costs
+     characters rather than gaining them: the value is a fixed 1fr between two
+     buttons, and "142.5" is already the width of the box at the shipped size.
+     So the − and + hand width back as the type grows — 1.5px each per px, the
+     ~12px five mono digits gain over the scale — and keep their target: the
+     tap area is the full 46px row, and 34px of width at the widest setting is
+     still wider than the 24px glyph standing in it. */
+  grid-template-columns:
+    calc(40px - var(--text-plus) * 1.5) 1fr calc(40px - var(--text-plus) * 1.5);
   align-items: center;
   background: var(--slab-2);
   border: 1px solid var(--edge);
@@ -500,7 +536,7 @@ body.has-rest .view { padding-bottom: 96px; }
   border: 0;
   background: transparent;
   color: var(--mist);
-  font-size: 20px;
+  font-size: calc(20px + var(--text-plus));
   font-weight: 500;
   line-height: 1;
   padding: 0;
@@ -514,7 +550,7 @@ body.has-rest .view { padding-bottom: 96px; }
   color: var(--chalk);
   font-family: var(--mono);
   /* ≥16px or Safari zooms the whole page on focus. */
-  font-size: 17px;
+  font-size: calc(17px + var(--text-plus));
   font-weight: 600;
   letter-spacing: -0.03em;
   text-align: center;
@@ -559,7 +595,7 @@ body.has-rest .view { padding-bottom: 96px; }
 
 .unit-tag {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px + var(--text-plus));
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--dim);
@@ -575,7 +611,7 @@ body.has-rest .view { padding-bottom: 96px; }
   background: var(--slab-2);
   color: var(--chalk);
   font-family: var(--sans);
-  font-size: 15px;
+  font-size: calc(15px + var(--text-plus));
   font-weight: 600;
   letter-spacing: -0.01em;
   min-height: 46px;
@@ -599,15 +635,15 @@ body.has-rest .view { padding-bottom: 96px; }
 .btn-quiet { background: transparent; color: var(--mist); }
 .btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--edge)); background: transparent; }
 .btn-block { width: 100%; }
-.btn-sm { min-height: 38px; font-size: 13.5px; padding: 0 12px; border-radius: 9px; }
-.btn-lg { min-height: 56px; font-size: 17px; border-radius: 14px; }
+.btn-sm { min-height: 38px; font-size: calc(13.5px + var(--text-plus)); padding: 0 12px; border-radius: 9px; }
+.btn-lg { min-height: 56px; font-size: calc(17px + var(--text-plus)); border-radius: 14px; }
 .btn[disabled] { opacity: .4; pointer-events: none; }
 
 /* A button that carries a subtitle. The second line says what the tap actually
    does, at the size of the .sub line above it, so it reads as a caption rather
    than as a second label competing with the first. */
 .btn-stack { flex-direction: column; gap: 1px; padding-top: 8px; padding-bottom: 8px; line-height: 1.2; }
-.btn-stack .bs { font-size: 13px; font-weight: 500; letter-spacing: 0; opacity: .72; }
+.btn-stack .bs { font-size: calc(13px + var(--text-plus)); font-weight: 500; letter-spacing: 0; opacity: .72; }
 
 .btn-row { display: flex; gap: 8px; }
 .btn-row > * { flex: 1; }
@@ -631,7 +667,7 @@ body.has-rest .view { padding-bottom: 96px; }
   background: transparent;
   color: var(--mist);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px + var(--text-plus));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -647,7 +683,7 @@ body.has-rest .view { padding-bottom: 96px; }
   border-radius: 999px;
   min-height: 34px;
   padding: 0 13px;
-  font-size: 13px;
+  font-size: calc(13px + var(--text-plus));
   font-weight: 600;
   cursor: pointer;
 }
@@ -668,7 +704,7 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .stat .k {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px + var(--text-plus));
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--dim);
@@ -677,15 +713,15 @@ body.has-rest .view { padding-bottom: 96px; }
 }
 .stat .v {
   font-family: var(--mono);
-  font-size: 26px;
+  font-size: calc(26px + var(--text-plus));
   font-weight: 700;
   letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
   line-height: 1;
   display: block;
 }
-.stat .v small { font-size: 13px; font-weight: 600; color: var(--mist); letter-spacing: 0; margin-left: 2px; }
-.stat .m { font-size: 12px; color: var(--dim); margin-top: 5px; display: block; }
+.stat .v small { font-size: calc(13px + var(--text-plus)); font-weight: 600; color: var(--mist); letter-spacing: 0; margin-left: 2px; }
+.stat .m { font-size: calc(12px + var(--text-plus)); color: var(--dim); margin-top: 5px; display: block; }
 .stat.accent .v { color: var(--signal); }
 /* The Next target tile's unit is a word — "reps", "sets of 5" — not the "kg"
    the 2px above was sized for, and at that gap it reads as one word. */
@@ -707,23 +743,26 @@ body.has-rest .view { padding-bottom: 96px; }
   color: var(--chalk);
   text-align: left;
   font-family: var(--sans);
-  font-size: 15px;
+  font-size: calc(15px + var(--text-plus));
   cursor: pointer;
 }
 .row:last-child { border-bottom: 0; }
 .row:active { background: var(--slab-2); }
 .row .grow { flex: 1; min-width: 0; }
-.row .t { font-weight: 600; letter-spacing: -0.01em; display: block; }
-.row .s { font-size: 12.5px; color: var(--dim); display: block; margin-top: 2px; }
+/* German compounds — "Schrägbankdrücken" — are one word wider than a narrow
+   phone's row at the top of the text scale, and a word with nowhere to break
+   runs out over the count beside it. Only ever used when it does not fit. */
+.row .t { font-weight: 600; letter-spacing: -0.01em; display: block; overflow-wrap: break-word; }
+.row .s { font-size: calc(12.5px + var(--text-plus)); color: var(--dim); display: block; margin-top: 2px; }
 .row .r {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: calc(13px + var(--text-plus));
   color: var(--mist);
   font-variant-numeric: tabular-nums;
   text-align: right;
   flex: none;
 }
-.row .r em { display: block; font-style: normal; font-size: 10.5px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
+.row .r em { display: block; font-style: normal; font-size: calc(10.5px + var(--text-plus)); color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
 .row.stale .r { color: var(--danger); }
 
 /* The routine list on the Log tab. It is the other way to start a session, so
@@ -752,8 +791,8 @@ body.has-rest .view { padding-bottom: 96px; }
 .info-list { border: 1px solid var(--edge); border-radius: var(--r-md); overflow: hidden; background: var(--slab); margin-top: 14px; }
 .info-item { padding: 12px 14px; border-bottom: 1px solid var(--edge); }
 .info-item:last-child { border-bottom: 0; }
-.info-item .t { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; display: block; }
-.info-item .s { font-size: 12.5px; color: var(--dim); margin-top: 3px; display: block; line-height: 1.5; }
+.info-item .t { font-weight: 600; font-size: calc(14px + var(--text-plus)); letter-spacing: -0.01em; display: block; }
+.info-item .s { font-size: calc(12.5px + var(--text-plus)); color: var(--dim); margin-top: 3px; display: block; line-height: 1.5; }
 
 /* ------------------------------------------------- editable option lists */
 
@@ -777,14 +816,14 @@ body.has-rest .view { padding-bottom: 96px; }
 .opt-v {
   flex: 1;
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: calc(15px + var(--text-plus));
   font-weight: 600;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 .opt-note {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px + var(--text-plus));
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
@@ -815,7 +854,7 @@ body.has-rest .view { padding-bottom: 96px; }
   flex: 1;
   min-width: 0;
   font-weight: 600;
-  font-size: 15px;
+  font-size: calc(15px + var(--text-plus));
   letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -833,12 +872,12 @@ body.has-rest .view { padding-bottom: 96px; }
   height: 40px;
   overflow: hidden;
 }
-.rt-sets .step { height: 38px; width: 34px; font-size: 18px; }
+.rt-sets .step { height: 38px; width: 34px; font-size: calc(18px + var(--text-plus)); }
 .rt-n {
   width: 40px;
   text-align: center;
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: calc(15px + var(--text-plus));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
@@ -846,7 +885,7 @@ body.has-rest .view { padding-bottom: 96px; }
 .rt-n em {
   display: block;
   font-style: normal;
-  font-size: 9px;
+  font-size: calc(9px + var(--text-plus));
   color: var(--dim);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -858,7 +897,7 @@ body.has-rest .view { padding-bottom: 96px; }
 .field { margin-bottom: 12px; }
 .field label {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px + var(--text-plus));
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--dim);
@@ -873,7 +912,7 @@ body.has-rest .view { padding-bottom: 96px; }
   border-radius: 11px;
   color: var(--chalk);
   font-family: var(--sans);
-  font-size: 16px; /* never below 16 on iOS */
+  font-size: calc(16px + var(--text-plus)); /* never below 16 on iOS */
   padding: 12px 13px;
   -webkit-appearance: none;
   appearance: none;
@@ -902,15 +941,15 @@ select.input {
   border: 2px dashed var(--edge-hi);
   border-radius: 50%;
 }
-.empty h3 { margin: 0 0 6px; font-size: 16px; font-weight: 700; color: var(--mist); letter-spacing: -0.01em; }
-.empty p { margin: 0 auto 16px; font-size: 13.5px; max-width: 30ch; }
+.empty h3 { margin: 0 0 6px; font-size: calc(16px + var(--text-plus)); font-weight: 700; color: var(--mist); letter-spacing: -0.01em; }
+.empty p { margin: 0 auto 16px; font-size: calc(13.5px + var(--text-plus)); max-width: 30ch; }
 
 /* ---------------------------------------------------------------- charts */
 
 .chart-card { padding: 14px 12px 8px; }
 .chart-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 2px 8px; gap: 10px; }
 .chart-head .eyebrow { margin: 0; }
-.chart-head .note { font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: 0.06em; }
+.chart-head .note { font-family: var(--mono); font-size: calc(10px + var(--text-plus)); color: var(--dim); letter-spacing: 0.06em; }
 /* A chart is a figure, not a document: a long press on one used to select the
    SVG's tick labels and raise the iOS callout ("Copy · Look Up") over the
    plot. Nothing in here is meant to be copied, and only the hit regions are
@@ -924,7 +963,7 @@ select.input {
 .chart { width: 100%; display: block; touch-action: pan-y; pointer-events: none; }
 .chart .axis { stroke: var(--edge); stroke-width: 1; }
 .chart .grid { stroke: var(--edge); stroke-width: 1; stroke-dasharray: 2 4; }
-.chart .tick { fill: var(--dim); font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em; }
+.chart .tick { fill: var(--dim); font-family: var(--mono); font-size: calc(9.5px + var(--text-plus)); letter-spacing: 0.04em; }
 .chart .line { fill: none; stroke: var(--signal); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
 /* The area fill under a line chart. The gradient stops are styled here rather
    than written as attributes in charts.js so the accent follows the theme —
@@ -952,7 +991,7 @@ select.input {
   background: var(--chalk);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px + var(--text-plus));
   font-weight: 600;
   letter-spacing: -0.01em;
   padding: 5px 8px;
@@ -990,19 +1029,25 @@ select.input {
 .rest-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  /* Four items on one line: label, clock, +30s, Skip. At the top of the text
+     scale a narrow phone in German ("Überspringen") cannot hold all four, and
+     the one that would be pushed off the edge is the button that ends the
+     timer. Wrapping it onto a second row keeps it reachable; there is nothing
+     under the bar but the tab strip, which it sits above either way. */
+  flex-wrap: wrap;
+  gap: 6px 10px;
   padding: 8px calc(var(--pad) + var(--safe-r)) 8px calc(var(--pad) + var(--safe-l));
 }
 .rest-label {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px + var(--text-plus));
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--dim);
 }
 .rest-clock {
   font-family: var(--mono);
-  font-size: 20px;
+  font-size: calc(20px + var(--text-plus));
   font-weight: 700;
   letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
@@ -1016,7 +1061,7 @@ select.input {
   border-radius: 9px;
   min-height: 34px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: calc(13px + var(--text-plus));
   font-weight: 600;
   cursor: pointer;
 }
@@ -1032,7 +1077,7 @@ select.input {
   max-width: calc(100vw - 32px);
   background: var(--chalk);
   color: var(--ink);
-  font-size: 14px;
+  font-size: calc(14px + var(--text-plus));
   font-weight: 600;
   letter-spacing: -0.01em;
   padding: 11px 15px;
@@ -1049,7 +1094,7 @@ select.input {
   color: var(--chalk);
   border-radius: 8px;
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: calc(13px + var(--text-plus));
   font-weight: 700;
   cursor: pointer;
 }
@@ -1097,7 +1142,7 @@ select.input {
 }
 .sheet-grab:active { cursor: grabbing; }
 .sheet-grab::after { content: ""; position: absolute; inset: -12px -60px; }
-.sheet h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
+.sheet h2 { margin: 0 0 4px; font-size: calc(20px + var(--text-plus)); font-weight: 800; letter-spacing: -0.03em; }
 .sheet .sub { margin-bottom: 14px; }
 @keyframes rise { from { transform: translateY(100%); } }
 @keyframes fade { from { opacity: 0; } }
@@ -1113,14 +1158,14 @@ select.input {
   color: var(--hint-fg);
   border-radius: var(--r-md);
   padding: 12px 13px;
-  font-size: 13.5px;
+  font-size: calc(13.5px + var(--text-plus));
   line-height: 1.4;
   margin-bottom: 14px;
 }
 .hint b { color: var(--signal); }
 .hint button {
   border: 0; background: transparent; color: var(--hint-fg);
-  font-size: 20px; line-height: 1; padding: 0 2px; cursor: pointer; flex: none;
+  font-size: calc(20px + var(--text-plus)); line-height: 1; padding: 0 2px; cursor: pointer; flex: none;
 }
 
 .pr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
@@ -1131,8 +1176,8 @@ select.input {
   padding: 9px 10px;
   text-align: left;
 }
-.pr .k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--dim); text-transform: uppercase; }
-.pr .v { font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin-top: 3px; }
+.pr .k { font-family: var(--mono); font-size: calc(10px + var(--text-plus)); letter-spacing: 0.1em; color: var(--dim); text-transform: uppercase; }
+.pr .v { font-family: var(--mono); font-size: calc(16px + var(--text-plus)); font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin-top: 3px; }
 
 /* ------------------------------------------------- finish-session debrief */
 
@@ -1157,10 +1202,10 @@ select.input {
 .verdict:last-child { border-bottom: 0; }
 .verdict .grow { flex: 1; min-width: 0; }
 .verdict .t { font-weight: 600; letter-spacing: -0.01em; display: block; }
-.verdict .s { font-size: 12.5px; color: var(--dim); display: block; margin-top: 2px; }
+.verdict .s { font-size: calc(12.5px + var(--text-plus)); color: var(--dim); display: block; margin-top: 2px; }
 .verdict .r {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: calc(14px + var(--text-plus));
   font-weight: 700;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
@@ -1176,7 +1221,7 @@ select.input {
 
 .meta {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px + var(--text-plus));
   color: var(--dim);
   letter-spacing: 0.02em;
   text-align: center;
@@ -1200,7 +1245,7 @@ select.input {
 }
 .linkish:active { color: var(--signal); }
 
-.swipe-note { font-size: 11.5px; color: var(--dim); text-align: center; padding: 8px 0 0; }
+.swipe-note { font-size: calc(11.5px + var(--text-plus)); color: var(--dim); text-align: center; padding: 8px 0 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
