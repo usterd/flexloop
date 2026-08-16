@@ -216,6 +216,13 @@ Weight step labels follow the unit setting; switching kg → lb relabels the lis
 rather than converting it, since the number you want is a property of your plates,
 not of the previous unit.
 
+### Appearance
+
+**Theme** and **Language** hold the same two choices the sun/moon and the
+two-letter chip in the topbar flip from any screen, plus *Match system* for the
+theme. **Text size** is only here: 0 to 4 px added to everything below the big
+heading — see [Text size](#text-size) for what that covers and what it does not.
+
 ### Motivation
 
 **Target to beat** picks the metric behind three things at once: the target line
@@ -318,6 +325,45 @@ greetings on the idle Log.
 - The changelog in `js/version.js` carries both languages per entry. Anything a
   translation has not reached falls back to the English it was written in, which
   is also what a missing key does.
+
+## Text size
+
+**Settings → Appearance → Text size** adds a whole number of px — 0 to 4 — to
+every text size in the app *below* the big heading each screen opens with: the
+30px `.h-big` the idle Log prints its greeting in ("Strong starts now."). That
+line is already the largest thing on a screen, so it is the ceiling the scale
+runs up to rather than a participant. Everything under it closes part of the gap.
+
+- The stored value is `textSize: 0…4`, applied as the `--text-plus` custom
+  property on `<html>`. Every rule in `css/app.css` is written
+  `font-size: calc(<size> + var(--text-plus))`, so nothing downstream of the
+  token knows the setting exists — the same arrangement as `data-theme`.
+- It is **one absolute number, not a multiplier**. A 9px mono caption gains 44%
+  and a 20px heading 20%, so the type scale compresses towards the heading
+  instead of scaling the layout out from under itself. Four px is where the
+  smallest labels have caught up with the body text; past that the set grid
+  starts losing digits rather than gaining size.
+- The inline script in `index.html` applies it **before first paint**, alongside
+  the theme and the language. Applied a frame later it would reflow the whole
+  app on every launch.
+- Charts are measured, not styled: `js/charts.js` reads `--text-plus` back at the
+  top of every draw and grows the gutters its tick labels sit in (`padL`,
+  `padR`), the minimum air between two x labels (`labelGap`, so a longer date
+  means the axis prints fewer of them), and the strip under the plot — the chart
+  gets taller by exactly that much, so the plot area is unchanged.
+- One place had to give width back rather than take it: the `−`/`+` columns of a
+  stepper narrow by 1.5px per px of type, since the number between them is a
+  fixed `1fr` and "142.5" was already the width of its box at the shipped size.
+  The buttons keep the full 46px row as their tap target.
+- Two rows that used to fit on one line now wrap rather than overrun when they
+  cannot: the ghost breaks between its parts instead of mid-number, and the rest
+  bar drops *Skip* to a second row rather than push it off a narrow screen. Both
+  are unchanged at the shipped size.
+- Below about 360 CSS px the set row is tight at any text size — the two 40px
+  stepper buttons and the 46px tick leave the value a sliver — so a 320px handset
+  (an original SE) shows fewer digits there whatever this is set to. That is the
+  layout as it shipped, not something the scale introduced; the stepper's giving
+  width back makes it slightly better at the top of the scale than at the bottom.
 
 ## Files
 
@@ -427,6 +473,11 @@ since there is nothing left to chart.
   preserved, but there is no UI for it.
 - A routine stores no weights, and no days-of-the-week schedule. It is a list to
   work down, not a programme to obey.
+- **Text size** defaults to 0 — the size the app shipped at — and is a number of
+  px rather than a percentage. A phone's own accessibility text size is a system
+  scale this app deliberately does not inherit (`-webkit-text-size-adjust: 100%`
+  is what keeps a set row a set row), so this is the one in the app, and it stops
+  where the layout does rather than where the eye might like it to.
 - The theme defaults to **dark**, not to the system setting. *Match system* is one
   tap away for anyone who wants it, but a gym at 6am is not a place to be handed a
   white screen because the phone thinks it is daytime.

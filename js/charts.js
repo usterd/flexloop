@@ -22,6 +22,53 @@ const PAD_R = 38;       // matched, so a chart with a right-hand axis still line
 const X_INSET = 20;     // ≥ half the widest bar or set group, so edges never clip
 const BAR_MAX = 26;
 const LABEL_GAP = 52;   // minimum px between two x labels
+const TICK_GAP = 6;     // between a y tick label and the axis it names
+const TICK_PX = 9.5;    // keep in step with .chart .tick in app.css
+
+/* ------------------------------------------------------------- text size
+
+   Every number above was measured against a 9.5px tick label, and Settings →
+   Appearance → Text size can add up to 4px to that. A gutter is not a box the
+   text can push open — an SVG label simply overruns it, or collides with its
+   neighbour — so the geometry has to be told, and the one place that cannot
+   drift from what is actually drawn is the custom property the stylesheet
+   sizes the labels from. Read it back rather than the setting itself.
+
+   Held in a module variable and refreshed at the top of every draw: charts
+   are redrawn on render and on resize, and the setting can only change
+   between the two. Everything derived from it is a function of TS, so a
+   chart drawn at one size never keeps the pads of another.                 */
+
+let TS = 0;
+
+function readTextSize() {
+  const v = parseFloat(getComputedStyle(document.documentElement)
+    .getPropertyValue('--text-plus'));
+  TS = isFinite(v) ? Math.max(0, Math.min(4, v)) : 0;
+}
+
+/* Tick labels are mono, so a label at 13.5px is exactly 13.5/9.5 as wide as
+   the same label at 9.5px. One ratio therefore covers every number measured
+   against a label — no per-character estimate needed. */
+const tickScale = () => (TICK_PX + TS) / TICK_PX;
+
+/* The gutters are a fixed gap to the axis plus room for the label itself, and
+   only the second half scales. LABEL_GAP is a distance between two label
+   centres, so all of it does: German dates ("18. Juni") are wide enough at the
+   top of the scale to touch otherwise. The axis answers by printing fewer
+   labels, which is the right trade — xTickIndices thins against this. */
+const padL = () => TICK_GAP + (PAD_L - TICK_GAP) * tickScale();
+const padR = () => TICK_GAP + (PAD_R - TICK_GAP) * tickScale();
+const labelGap = () => LABEL_GAP * tickScale();
+
+/* Half the cap height of a tick label: what a y label is nudged down by to sit
+   on its own gridline rather than above it. */
+const tickMid = () => (TICK_PX + TS) * 0.37;
+
+/* The x labels are drawn under the plot in a strip pad.b deep. Both grow by
+   the same amount, so the taller label is paid for out of the chart's height
+   rather than out of the plot area. */
+const xLabelPad = (base) => base + TS;
 
 /**
  * Map data x values onto the inner band. Identical for every chart type, so
@@ -29,8 +76,8 @@ const LABEL_GAP = 52;   // minimum px between two x labels
  * xs: Number[] — ascending. Returns { pos: px per point, a, b } band edges.
  */
 function xLayout(xs, W) {
-  const a = PAD_L + X_INSET;
-  const b = W - PAD_R - X_INSET;
+  const a = padL() + X_INSET;
+  const b = W - padR() - X_INSET;
   const lo = Math.min(...xs);
   const hi = Math.max(...xs);
   const span = hi - lo;
@@ -54,7 +101,7 @@ function xTickIndices(pos) {
   const keep = [];
   let last = Infinity;
   for (let i = pos.length - 1; i >= 0; i--) {
-    if (last - pos[i] < LABEL_GAP) continue;
+    if (last - pos[i] < labelGap()) continue;
     keep.push(i);
     last = pos[i];
   }
@@ -64,8 +111,8 @@ function xTickIndices(pos) {
 /** One hit region per point, bounded by the midpoints to its neighbours. */
 function addHits(svg, pos, W, top, height, select) {
   pos.forEach((x, i) => {
-    const l = i === 0 ? PAD_L : (pos[i - 1] + x) / 2;
-    const r = i === pos.length - 1 ? W - PAD_R : (x + pos[i + 1]) / 2;
+    const l = i === 0 ? padL() : (pos[i - 1] + x) / 2;
+    const r = i === pos.length - 1 ? W - padR() : (x + pos[i + 1]) / 2;
     const hit = svgEl('rect', { class: 'hit', x: l, y: top, width: Math.max(1, r - l), height });
     hit.addEventListener('pointerdown', (e) => { e.stopPropagation(); select(i); });
     svg.appendChild(hit);
@@ -284,9 +331,12 @@ export function lineChart(wrap, points, opts = {}) {
     if (!points || points.length === 0) {
       return emptyState(wrap, opts.empty || t('chart.emptyLine'));
     }
+    readTextSize();
     const W = Math.max(240, wrap.clientWidth || 320);
-    const H = opts.height || 190;
-    const pad = { t: 12, r: PAD_R, b: 22, l: PAD_L };
+    // The chart grows by exactly what its x label strip gained, so the plot
+    // itself is the same height at every text size.
+    const H = (opts.height || 190) + TS;
+    const pad = { t: 12, r: padR(), b: xLabelPad(22), l: padL() };
     const ih = H - pad.t - pad.b;
 
     const ys = points.map((p) => p.y);
@@ -314,7 +364,7 @@ export function lineChart(wrap, points, opts = {}) {
     ticks.forEach((t) => {
       const y = py(t);
       svg.appendChild(svgEl('line', { class: 'grid', x1: pad.l, x2: W - pad.r, y1: y, y2: y }));
-      const lab = svgEl('text', { class: 'tick', x: pad.l - 6, y: y + 3.5, 'text-anchor': 'end' });
+      const lab = svgEl('text', { class: 'tick', x: pad.l - TICK_GAP, y: y + tickMid(), 'text-anchor': 'end' });
       lab.textContent = opts.tickFormat ? opts.tickFormat(t) : String(t);
       svg.appendChild(lab);
     });
@@ -381,9 +431,10 @@ export function lineChart(wrap, points, opts = {}) {
 export function barChart(wrap, bars, opts = {}) {
   const draw = () => {
     if (!bars || bars.length === 0) return emptyState(wrap, opts.empty || t('chart.empty'));
+    readTextSize();
     const W = Math.max(240, wrap.clientWidth || 320);
-    const H = opts.height || 150;
-    const pad = { t: 10, r: PAD_R, b: 20, l: PAD_L };
+    const H = (opts.height || 150) + TS;
+    const pad = { t: 10, r: padR(), b: xLabelPad(20), l: padL() };
     const ih = H - pad.t - pad.b;
 
     const ov = opts.overlay && Array.isArray(opts.overlay.values) ? opts.overlay : null;
@@ -437,7 +488,7 @@ export function barChart(wrap, bars, opts = {}) {
     ticks.forEach((t) => {
       const y = py(t);
       svg.appendChild(svgEl('line', { class: 'grid', x1: pad.l, x2: W - pad.r, y1: y, y2: y }));
-      const lab = svgEl('text', { class: 'tick', x: pad.l - 6, y: y + 3.5, 'text-anchor': 'end' });
+      const lab = svgEl('text', { class: 'tick', x: pad.l - TICK_GAP, y: y + tickMid(), 'text-anchor': 'end' });
       lab.textContent = opts.tickFormat ? opts.tickFormat(t) : String(t);
       svg.appendChild(lab);
     });
@@ -537,9 +588,12 @@ export function setChart(wrap, groups, opts = {}) {
     const live = (groups || []).filter((g) => g.sets && g.sets.length);
     if (!live.length) return emptyState(wrap, opts.empty || t('chart.empty'));
 
+    readTextSize();
     const W = Math.max(240, wrap.clientWidth || 320);
-    const H = opts.height || 190;
-    const pad = { t: 12, r: PAD_R, b: 22, l: PAD_L };
+    // The chart grows by exactly what its x label strip gained, so the plot
+    // itself is the same height at every text size.
+    const H = (opts.height || 190) + TS;
+    const pad = { t: 12, r: padR(), b: xLabelPad(22), l: padL() };
     const ih = H - pad.t - pad.b;
 
     const sets = live.flatMap((g) => g.sets);
@@ -602,10 +656,10 @@ export function setChart(wrap, groups, opts = {}) {
     R.ticks.forEach((t, i) => {
       const y = pyR(t);
       svg.appendChild(svgEl('line', { class: 'grid', x1: pad.l, x2: W - pad.r, y1: y, y2: y }));
-      const l = svgEl('text', { class: 'tick', x: pad.l - 6, y: y + 3.5, 'text-anchor': 'end' });
+      const l = svgEl('text', { class: 'tick', x: pad.l - TICK_GAP, y: y + tickMid(), 'text-anchor': 'end' });
       l.textContent = opts.repFormat ? opts.repFormat(t) : String(t);
       svg.appendChild(l);
-      const r = svgEl('text', { class: 'tick', x: W - pad.r + 6, y: y + 3.5, 'text-anchor': 'start' });
+      const r = svgEl('text', { class: 'tick', x: W - pad.r + TICK_GAP, y: y + tickMid(), 'text-anchor': 'start' });
       r.textContent = opts.weightFormat ? opts.weightFormat(K.ticks[i]) : String(K.ticks[i]);
       svg.appendChild(r);
     });

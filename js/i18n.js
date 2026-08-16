@@ -164,6 +164,11 @@ const STRINGS = {
   'theme.sun': ['sun', 'Sonne'],
   'theme.moon': ['moon', 'Mond'],
 
+  /* Settings → Appearance → Text size. The steps are printed as the px they
+     add, since that is exactly what they do — there is no "medium" here. */
+  'textSize.none': ['Default', 'Standard'],
+  'textSize.plus': ['+{n} px', '+{n} px'],
+
   /* The label describes the language you would get, so each side names the
      other one — in the language currently on screen. */
   'lang.toggle': ['Switch to German', 'Auf Englisch umschalten'],
@@ -421,6 +426,9 @@ const STRINGS = {
   'settings.language': ['Language', 'Sprache'],
   'settings.languageNote': ['{code} beside the wordmark switches language from any screen. Dates and numbers follow it.',
     '{code} neben dem Schriftzug wechselt die Sprache von jedem Bildschirm aus. Datum und Zahlen folgen mit.'],
+  'settings.textSize': ['Text size', 'Schriftgröße'],
+  'settings.textSizeNote': ['Adds up to 4 px to everything smaller than the greeting on the Log — labels, numbers and captions gain the most.',
+    'Legt bis zu 4 px auf alles, was kleiner ist als der Gruß im Training — Beschriftungen, Zahlen und Notizen gewinnen am meisten.'],
   'settings.preferences': ['Preferences', 'Einstellungen'],
   'settings.unit': ['Weight unit', 'Gewichtseinheit'],
   'settings.kg': ['Kilograms (kg)', 'Kilogramm (kg)'],
@@ -845,8 +853,8 @@ const LISTS = {
         'With no history logged, the Log offers Load sample data: six months of an example split, so the charts and records have something to show. It never touches your settings, and Remove sample data here takes all of it back out, leaving anything you logged yourself — including any sample exercise you have since used.'],
       ['Target to beat',
         'Which metric the Log’s target line, the Next target tile and the finish-session read-out all measure. Estimated 1RM responds to weight and reps both; Heaviest set and Reps are blunter; Volume is the easiest to beat, since another set does it. None turns all three off. A lift that has never carried a load is always measured in reps.'],
-      ['Theme and language',
-        'Dark, light, or match system; English or German. The sun/moon and the two-letter language chip beside the wordmark both flip from any screen, and the language carries the date and number formats with it.'],
+      ['Theme, language and text size',
+        'Dark, light, or match system; English or German. The sun/moon and the two-letter language chip beside the wordmark both flip from any screen, and the language carries the date and number formats with it. Text size adds 1 to 4 px to everything below the greeting on the Log — the small mono labels gain the most, since they had the least.'],
       ['Reload app, Check for update, Clear offline cache',
         'Installed on the Home Screen there is no address bar, so Reload app is the way to reopen the page as it stands. Check for update asks the server whether a newer version exists — the browser only looks on its own schedule otherwise — and a new one installs in the background behind a Reload toast, so it never lands mid-set. Clear offline cache is the blunt one: it deletes every stored copy of the app so the next load fetches all of it again, which is what to reach for when a release was redeployed under a version number that did not change. It needs a connection, and none of the three touch your data.'],
       ['The version at the foot',
@@ -867,8 +875,8 @@ const LISTS = {
         'Ohne aufgezeichnete Historie bietet das Training Beispieldaten laden an: sechs Monate eines Beispielsplits, damit Diagramme und Bestleistungen etwas zu zeigen haben. Deine Einstellungen bleiben unangetastet, und Beispieldaten entfernen nimmt hier alles wieder heraus — bis auf das, was du selbst aufgezeichnet hast, samt jeder Beispielübung, die du seitdem benutzt hast.'],
       ['Zu schlagender Wert',
         'Welche Größe die Zielzeile im Training, die Kachel Nächstes Ziel und die Auswertung am Ende einer Einheit messen. Geschätztes 1RM reagiert auf Gewicht und Wiederholungen; Schwerster Satz und Wdh. sind gröber; Volumen ist am leichtesten zu schlagen, ein weiterer Satz genügt. Keiner schaltet alle drei ab. Eine Übung, die nie eine Last getragen hat, wird immer in Wiederholungen gemessen.'],
-      ['Design und Sprache',
-        'Dunkel, hell oder wie das System; Englisch oder Deutsch. Sonne/Mond und das zweibuchstabige Sprachkürzel neben dem Schriftzug schalten von jedem Bildschirm aus um, und die Sprache nimmt Datums- und Zahlenformat mit.'],
+      ['Design, Sprache und Schriftgröße',
+        'Dunkel, hell oder wie das System; Englisch oder Deutsch. Sonne/Mond und das zweibuchstabige Sprachkürzel neben dem Schriftzug schalten von jedem Bildschirm aus um, und die Sprache nimmt Datums- und Zahlenformat mit. Schriftgröße legt 1 bis 4 px auf alles unterhalb des Grußes im Training — die kleinen Mono-Beschriftungen gewinnen am meisten, weil sie am wenigsten hatten.'],
       ['App neu laden, Nach Update suchen, Offline-Cache leeren',
         'Auf dem Home-Bildschirm installiert gibt es keine Adressleiste, App neu laden ist also der Weg, die Seite neu zu öffnen. Nach Update suchen fragt den Server, ob es eine neuere Fassung gibt — sonst schaut der Browser nur nach eigenem Zeitplan — und eine neue installiert sich im Hintergrund hinter einem Neu-laden-Hinweis, damit sie nie mitten im Satz landet. Offline-Cache leeren ist das grobe Mittel: Es löscht jede gespeicherte Kopie der App, sodass der nächste Start alles neu holt — richtig, wenn eine Fassung unter unveränderter Versionsnummer neu veröffentlicht wurde. Es braucht eine Verbindung, und keines der drei rührt deine Daten an.'],
       ['Die Version ganz unten',
